@@ -75,14 +75,61 @@ chrome.action.onClicked.addListener(() => {
   panelVisible = !panelVisible
   console.log("[GlassPanel] Новое состояние panelVisible =", panelVisible)
 
+  // Метка времени для отслеживания синхронизации
+  const actionTimestamp = Date.now()
+
   // Отправляем сообщение всем активным вкладкам
   chrome.tabs.query({}, (tabs) => {
     console.log(
       `[GlassPanel] Отправляем сообщение togglePanel(${panelVisible}) на ${tabs.length} вкладок`
     )
 
+    // Считаем, сколько вкладок получат обновление
+    let compatibleTabsCount = 0
     tabs.forEach((tab) => {
-      sendPanelState(tab.id, tab.url)
+      if (canInjectContentScript(tab.url)) {
+        compatibleTabsCount++
+      }
+    })
+    console.log(
+      `[GlassPanel] Из них совместимых вкладок: ${compatibleTabsCount}`
+    )
+
+    // Отправляем сообщения только на совместимые вкладки
+    tabs.forEach((tab) => {
+      if (canInjectContentScript(tab.url)) {
+        // Добавляем небольшую задержку для предотвращения гонки условий
+        setTimeout(() => {
+          try {
+            console.log(
+              `[GlassPanel] Отправляем togglePanel(${panelVisible}) на вкладку ${tab.id}`
+            )
+            chrome.tabs.sendMessage(
+              tab.id,
+              {
+                action: "togglePanel",
+                show: panelVisible,
+                timestamp: actionTimestamp,
+              },
+              (response) => {
+                console.log(
+                  `[GlassPanel] Ответ на togglePanel от вкладки ${tab.id}:`,
+                  response || "нет ответа"
+                )
+              }
+            )
+          } catch (error) {
+            console.error(
+              `[GlassPanel] Ошибка при отправке togglePanel на вкладку ${tab.id}:`,
+              error
+            )
+          }
+        }, 50)
+      } else {
+        console.log(
+          `[GlassPanel] Пропускаем отправку на вкладку ${tab.id}, url=${tab.url} (несовместимый URL)`
+        )
+      }
     })
   })
 })
@@ -96,10 +143,34 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     )
 
     // Если панель видима, отправляем статус на обновленную вкладку
-    if (panelVisible) {
+    if (panelVisible && canInjectContentScript(tab.url)) {
       // Даем время для загрузки контент-скрипта
       setTimeout(() => {
-        sendPanelState(tabId, tab.url)
+        try {
+          console.log(
+            `[GlassPanel] Отправляем togglePanel(${panelVisible}) на обновленную вкладку ${tabId}`
+          )
+          chrome.tabs.sendMessage(
+            tabId,
+            {
+              action: "togglePanel",
+              show: panelVisible,
+              isTabUpdate: true,
+              timestamp: Date.now(),
+            },
+            (response) => {
+              console.log(
+                `[GlassPanel] Ответ на togglePanel от обновленной вкладки ${tabId}:`,
+                response || "нет ответа"
+              )
+            }
+          )
+        } catch (error) {
+          console.error(
+            `[GlassPanel] Ошибка при отправке togglePanel на обновленную вкладку ${tabId}:`,
+            error
+          )
+        }
       }, 500)
     }
   }
@@ -126,8 +197,36 @@ chrome.tabs.onCreated.addListener((tab) => {
           return
         }
 
-        if (updatedTab) {
-          sendPanelState(tab.id, updatedTab.url)
+        if (updatedTab && canInjectContentScript(updatedTab.url)) {
+          try {
+            console.log(
+              `[GlassPanel] Отправляем togglePanel(${panelVisible}) на новую вкладку ${tab.id}`
+            )
+            chrome.tabs.sendMessage(
+              tab.id,
+              {
+                action: "togglePanel",
+                show: panelVisible,
+                isNewTab: true,
+                timestamp: Date.now(),
+              },
+              (response) => {
+                console.log(
+                  `[GlassPanel] Ответ на togglePanel от новой вкладки ${tab.id}:`,
+                  response || "нет ответа"
+                )
+              }
+            )
+          } catch (error) {
+            console.error(
+              `[GlassPanel] Ошибка при отправке togglePanel на новую вкладку ${tab.id}:`,
+              error
+            )
+          }
+        } else {
+          console.log(
+            `[GlassPanel] Пропускаем отправку на новую вкладку ${tab.id} (несовместимый URL)`
+          )
         }
       })
     }, 1000) // Увеличиваем время ожидания до 1 секунды
@@ -141,7 +240,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === "closePanel") {
     console.log("[GlassPanel] Обрабатываем запрос на закрытие панели")
+    // Меняем статус панели на скрытую
     panelVisible = false
+    console.log("[GlassPanel] Обновлено состояние panelVisible =", panelVisible)
 
     // Отправляем сообщение всем активным вкладкам о закрытии панели
     chrome.tabs.query({}, (tabs) => {
@@ -149,20 +250,64 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         `[GlassPanel] Отправляем сообщение togglePanel(false) на ${tabs.length} вкладок для закрытия`
       )
 
+      // Метка времени для отслеживания синхронизации
+      const closeTimestamp = Date.now()
+
       tabs.forEach((tab) => {
-        sendPanelState(tab.id, tab.url)
+        // Проверяем, можно ли отправить сообщение на эту вкладку
+        if (canInjectContentScript(tab.url)) {
+          // Добавляем небольшую задержку для предотвращения гонки условий
+          setTimeout(() => {
+            try {
+              chrome.tabs.sendMessage(
+                tab.id,
+                {
+                  action: "togglePanel",
+                  show: false,
+                  timestamp: closeTimestamp,
+                },
+                (response) => {
+                  console.log(
+                    `[GlassPanel] Ответ на закрытие панели от вкладки ${tab.id}:`,
+                    response || "нет ответа"
+                  )
+                }
+              )
+            } catch (error) {
+              console.error(
+                `[GlassPanel] Ошибка при отправке закрытия на вкладку ${tab.id}:`,
+                error
+              )
+            }
+          }, 50)
+        } else {
+          console.log(
+            `[GlassPanel] Пропускаем отправку закрытия на вкладку ${tab.id} (несовместимый URL)`
+          )
+        }
       })
     })
+
+    // Отвечаем на запрос
+    sendResponse({
+      success: true,
+      action: "closePanel",
+      status: "панель будет закрыта на всех вкладках",
+    })
+    return true
   } else if (message.action === "checkPanelState") {
     // Отвечаем на запрос о текущем состоянии панели
     console.log(
       `[GlassPanel] Отвечаем на запрос о состоянии панели: ${panelVisible}`
     )
-    sendResponse({ show: panelVisible })
+    sendResponse({
+      show: panelVisible,
+      timestamp: Date.now(),
+    })
     return true
   }
 
-  // Подтверждаем получение сообщения
+  // Подтверждаем получение сообщения для других типов запросов
   console.log("[GlassPanel] Отправляем подтверждение получения сообщения")
   sendResponse({ success: true })
   return true

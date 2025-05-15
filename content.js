@@ -68,43 +68,8 @@ function createPanel() {
     // Устанавливаем отступ для body чтобы контент не перекрывался
     document.body.style.marginTop = "50px"
 
-    // Добавляем обработчики событий для кнопок
-    closeButton.addEventListener("click", function () {
-      console.log("[GlassPanel] Нажата кнопка закрытия панели")
-      // Отправляем сообщение в background.js о закрытии панели
-      try {
-        chrome.runtime.sendMessage(
-          { action: "closePanel" },
-          function (response) {
-            if (chrome.runtime.lastError) {
-              console.log(
-                `[GlassPanel] Ошибка при отправке closePanel: ${chrome.runtime.lastError.message}`
-              )
-            } else if (response) {
-              console.log("[GlassPanel] Ответ на closePanel:", response)
-            }
-          }
-        )
-      } catch (error) {
-        console.error(
-          "[GlassPanel] Ошибка при отправке сообщения closePanel:",
-          error
-        )
-      }
-    })
-
-    settingsButton.addEventListener("click", function () {
-      console.log("[GlassPanel] Нажата кнопка настроек")
-      // Открываем модальное окно настроек
-      try {
-        openSettingsModal()
-      } catch (error) {
-        console.error(
-          "[GlassPanel] Ошибка при открытии модального окна настроек:",
-          error
-        )
-      }
-    })
+    // Обновляем обработчики событий для кнопок
+    updateEventListeners()
 
     console.log("[GlassPanel] Панель успешно создана")
     return panel
@@ -125,37 +90,73 @@ function togglePanel(show) {
 
   try {
     let panel = document.getElementById("glass-panel")
+    const modal = document.getElementById("glass-settings-modal")
+
     console.log("[GlassPanel] Текущая панель:", panel)
+    console.log("[GlassPanel] Текущее модальное окно:", modal)
 
-    if (!panel && show) {
-      console.log(
-        "[GlassPanel] Панель не существует и show=true, создаем панель"
-      )
-      panel = createPanel()
+    if (show) {
+      // Если нужно показать панель
       if (!panel) {
-        console.error("[GlassPanel] Не удалось создать панель")
-        return
+        console.log(
+          "[GlassPanel] Панель не существует и show=true, создаем панель"
+        )
+        panel = createPanel()
+        if (!panel) {
+          console.error("[GlassPanel] Не удалось создать панель")
+          return
+        }
+      } else {
+        // Если панель уже существует, просто делаем ее видимой
+        console.log("[GlassPanel] Панель существует, делаем видимой")
+        panel.style.display = "flex"
       }
-    } else if (!panel) {
-      console.log(
-        "[GlassPanel] Панель не существует и show=false, ничего не делаем"
-      )
-      return // Если панель не существует и мы хотим ее скрыть, ничего не делаем
-    }
 
-    console.log(`[GlassPanel] Устанавливаем display=${show ? "block" : "none"}`)
-    panel.style.display = show ? "block" : "none"
+      // Явно устанавливаем стили отображения
+      panel.style.position = "fixed"
+      panel.style.top = "0"
+      panel.style.left = "0"
+      panel.style.right = "0"
+      panel.style.zIndex = "2147483647"
 
-    // Получаем высоту панели и устанавливаем соответствующий отступ
-    if (document.body) {
-      const panelHeight = show ? (panel.offsetHeight || 50) + "px" : "0"
-      console.log(`[GlassPanel] Устанавливаем marginTop=${panelHeight}`)
-      document.body.style.marginTop = panelHeight
-      document.body.style.transition = "margin-top 0.3s ease" // Добавляем плавный переход
+      // Устанавливаем отступ для body
+      if (document.body) {
+        const panelHeight = panel.offsetHeight || 50
+        console.log(`[GlassPanel] Устанавливаем marginTop=${panelHeight}px`)
+        document.body.style.marginTop = panelHeight + "px"
+        document.body.style.transition = "margin-top 0.3s ease"
+      }
+
+      // Обновляем обработчики событий
+      setTimeout(updateEventListeners, 100)
     } else {
-      console.error(
-        "[GlassPanel] document.body недоступен при установке marginTop"
-      )
+      // Если нужно скрыть панель
+      if (panel) {
+        console.log(
+          "[GlassPanel] Панель существует и show=false, удаляем панель из DOM"
+        )
+
+        // Сначала восстанавливаем marginTop для body
+        if (document.body) {
+          console.log("[GlassPanel] Возвращаем marginTop=0")
+          document.body.style.marginTop = "0"
+        }
+
+        // Затем удаляем панель из DOM
+        panel.parentNode.removeChild(panel)
+        console.log("[GlassPanel] Панель удалена из DOM")
+      } else {
+        console.log(
+          "[GlassPanel] Панель не существует и show=false, ничего не делаем"
+        )
+      }
+
+      // Также закрываем модальное окно настроек если оно открыто
+      if (modal) {
+        console.log("[GlassPanel] Закрываем модальное окно настроек")
+        modal.parentNode.removeChild(modal)
+        console.log("[GlassPanel] Модальное окно удалено из DOM")
+      }
     }
   } catch (error) {
     console.error("[GlassPanel] Ошибка при togglePanel:", error)
@@ -234,21 +235,8 @@ function createSettingsModal() {
     console.log("[GlassPanel] document.body доступен, добавляем модальное окно")
     document.body.appendChild(settingsModal)
 
-    // Добавляем обработчики событий
-    settingsClose.addEventListener("click", function () {
-      console.log("[GlassPanel] Нажата кнопка закрытия модального окна")
-      closeSettingsModal()
-    })
-
-    // Закрытие модального окна при клике вне его содержимого
-    settingsModal.addEventListener("click", function (event) {
-      if (event.target === settingsModal) {
-        console.log(
-          "[GlassPanel] Клик вне содержимого модального окна, закрываем"
-        )
-        closeSettingsModal()
-      }
-    })
+    // Обновляем обработчики событий
+    updateEventListeners()
 
     console.log("[GlassPanel] Модальное окно успешно создано")
     return settingsModal
@@ -278,6 +266,9 @@ function openSettingsModal() {
 
     console.log("[GlassPanel] Отображаем модальное окно")
     modal.style.display = "flex"
+
+    // Обновляем обработчики событий
+    updateEventListeners()
   } catch (error) {
     console.error("[GlassPanel] Ошибка при открытии модального окна:", error)
   }
@@ -293,13 +284,120 @@ function closeSettingsModal() {
     const modal = document.getElementById("glass-settings-modal")
 
     if (modal) {
-      console.log("[GlassPanel] Скрываем модальное окно")
-      modal.style.display = "none"
+      console.log("[GlassPanel] Удаляем модальное окно из DOM")
+      modal.parentNode.removeChild(modal)
+      console.log("[GlassPanel] Модальное окно удалено из DOM")
     } else {
       console.log("[GlassPanel] Модальное окно не найдено для закрытия")
     }
   } catch (error) {
     console.error("[GlassPanel] Ошибка при закрытии модального окна:", error)
+  }
+}
+
+// Глобальный обработчик нажатия клавиши Escape для закрытия модального окна настроек
+document.addEventListener("keydown", function (event) {
+  if (event.key === "Escape") {
+    console.log("[GlassPanel] Нажата клавиша Escape, закрываем модальное окно")
+    closeSettingsModal()
+  }
+})
+
+// Функция для обновления обработчиков событий на кнопках
+function updateEventListeners() {
+  console.log("[GlassPanel] Обновляем обработчики событий")
+
+  // Обработчик для кнопки закрытия модального окна
+  const modalCloseButton = document.getElementById("glass-settings-close")
+  if (modalCloseButton) {
+    // Сначала удалим все обработчики событий
+    const newModalCloseButton = modalCloseButton.cloneNode(true)
+    modalCloseButton.parentNode.replaceChild(
+      newModalCloseButton,
+      modalCloseButton
+    )
+
+    // Добавим новый обработчик
+    newModalCloseButton.addEventListener("click", function (event) {
+      console.log("[GlassPanel] Нажата кнопка закрытия модального окна")
+      event.stopPropagation() // Предотвращаем всплытие события
+      closeSettingsModal()
+    })
+    console.log("[GlassPanel] Обновлен обработчик для кнопки закрытия настроек")
+  }
+
+  // Обработчик для кнопки закрытия панели
+  const panelCloseButton = document.getElementById("glass-panel-close")
+  if (panelCloseButton) {
+    // Сначала удалим все обработчики событий
+    const newPanelCloseButton = panelCloseButton.cloneNode(true)
+    panelCloseButton.parentNode.replaceChild(
+      newPanelCloseButton,
+      panelCloseButton
+    )
+
+    // Добавим новый обработчик
+    newPanelCloseButton.addEventListener("click", function (event) {
+      console.log("[GlassPanel] Нажата кнопка закрытия панели")
+      event.stopPropagation() // Предотвращаем всплытие события
+
+      // Отправляем сообщение в background.js о закрытии панели
+      try {
+        chrome.runtime.sendMessage(
+          { action: "closePanel" },
+          function (response) {
+            if (chrome.runtime.lastError) {
+              console.log(
+                `[GlassPanel] Ошибка при отправке closePanel: ${chrome.runtime.lastError.message}`
+              )
+            } else if (response) {
+              console.log("[GlassPanel] Ответ на closePanel:", response)
+            }
+          }
+        )
+      } catch (error) {
+        console.error(
+          "[GlassPanel] Ошибка при отправке сообщения closePanel:",
+          error
+        )
+      }
+    })
+    console.log("[GlassPanel] Обновлен обработчик для кнопки закрытия панели")
+  }
+
+  // Обработчик для кнопки настроек
+  const settingsButton = document.getElementById("glass-panel-settings")
+  if (settingsButton) {
+    // Сначала удалим все обработчики событий
+    const newSettingsButton = settingsButton.cloneNode(true)
+    settingsButton.parentNode.replaceChild(newSettingsButton, settingsButton)
+
+    // Добавим новый обработчик
+    newSettingsButton.addEventListener("click", function (event) {
+      console.log("[GlassPanel] Нажата кнопка настроек")
+      event.stopPropagation() // Предотвращаем всплытие события
+      openSettingsModal()
+    })
+    console.log("[GlassPanel] Обновлен обработчик для кнопки настроек")
+  }
+
+  // Обновляем обработчик для клика вне модального окна
+  const modal = document.getElementById("glass-settings-modal")
+  if (modal) {
+    // Сначала удаляем все обработчики
+    const newModal = modal.cloneNode(true)
+    modal.parentNode.replaceChild(newModal, modal)
+
+    // Добавляем новый обработчик
+    newModal.addEventListener("click", function (event) {
+      if (event.target === newModal) {
+        console.log(
+          "[GlassPanel] Клик вне содержимого модального окна, закрываем"
+        )
+        closeSettingsModal()
+      }
+    })
+    console.log("[GlassPanel] Обновлен обработчик для модального окна")
   }
 }
 
@@ -323,11 +421,16 @@ function handleTogglePanel(show) {
   console.log(`[GlassPanel] handleTogglePanel вызван с параметром show=${show}`)
 
   try {
+    // Приводим к булевому типу для уверенности
+    show = show === true
+
     console.log("[GlassPanel] glassPanel доступен:", !!glassPanel)
     console.log("[GlassPanel] glassPanel.panel доступен:", !!glassPanel.panel)
 
     if (glassPanel && glassPanel.panel) {
       console.log("[GlassPanel] Вызываем функцию toggle, show=", show)
+
+      // Убеждаемся, что toggle выполняется только с булевыми значениями
       glassPanel.panel.toggle(show)
     } else {
       console.error("[GlassPanel] glassPanel или glassPanel.panel недоступны!")
@@ -348,23 +451,31 @@ function checkPanelState() {
           console.log(
             `[GlassPanel] Ошибка при запросе состояния панели: ${chrome.runtime.lastError.message}`
           )
+          // В случае ошибки, скрываем панель для перестраховки
+          handleTogglePanel(false)
           return
         }
 
-        if (response && response.show) {
-          console.log(
-            `[GlassPanel] Получен ответ о состоянии панели: ${response.show}`
-          )
-          handleTogglePanel(response.show)
-        }
+        console.log(`[GlassPanel] Получен ответ о состоянии панели:`, response)
+
+        // Проверяем ответ и преобразуем в булево значение
+        const shouldShowPanel = response && response.show === true
+        console.log(
+          `[GlassPanel] Итоговое состояние панели: ${shouldShowPanel}`
+        )
+
+        // Приводим панель в соответствующее состояние
+        handleTogglePanel(shouldShowPanel)
       }
     )
   } catch (error) {
     console.error("[GlassPanel] Ошибка при проверке состояния панели:", error)
+    // В случае ошибки скрываем панель
+    handleTogglePanel(false)
   }
 }
 
-// После загрузки страницы создаем модальное окно настроек и проверяем состояние панели
+// После загрузки страницы проверяем состояние панели
 if (
   document.readyState === "complete" ||
   document.readyState === "interactive"
@@ -372,9 +483,10 @@ if (
   console.log(
     `[GlassPanel] Документ уже загружен (readyState = ${document.readyState}), инициализируем сразу`
   )
-  if (glassPanel && glassPanel.settings) {
-    glassPanel.settings.createModal()
-  }
+  // Отключаем автоматическое создание модального окна настроек
+  // if (glassPanel && glassPanel.settings) {
+  //   glassPanel.settings.createModal()
+  // }
 
   // Проверяем состояние панели
   checkPanelState()
@@ -384,9 +496,10 @@ if (
   )
   window.addEventListener("load", function () {
     console.log("[GlassPanel] Документ загружен, инициализируем")
-    if (glassPanel && glassPanel.settings) {
-      glassPanel.settings.createModal()
-    }
+    // Отключаем автоматическое создание модального окна настроек
+    // if (glassPanel && glassPanel.settings) {
+    //   glassPanel.settings.createModal()
+    // }
 
     // Проверяем состояние панели после загрузки страницы
     checkPanelState()
@@ -400,12 +513,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   try {
     if (message.action === "togglePanel") {
       console.log(`[GlassPanel] Обрабатываем togglePanel, show=${message.show}`)
-      handleTogglePanel(message.show)
-    }
 
-    // Подтверждаем получение сообщения
-    console.log("[GlassPanel] Отправляем подтверждение получения сообщения")
-    sendResponse({ success: true })
+      // Убеждаемся, что статус правильно установлен
+      const shouldShow = !!message.show // Приводим к boolean
+      console.log(`[GlassPanel] Преобразованный статус show=${shouldShow}`)
+
+      // Вызываем togglePanel с явным указанием show параметра
+      handleTogglePanel(shouldShow)
+
+      // Подтверждаем получение с результатом действия
+      console.log("[GlassPanel] Отправляем подтверждение обработки togglePanel")
+      sendResponse({
+        success: true,
+        panelVisible: shouldShow,
+        timestamp: Date.now(),
+      })
+    }
   } catch (error) {
     console.error("[GlassPanel] Ошибка при обработке сообщения:", error)
     sendResponse({ success: false, error: error.message })
