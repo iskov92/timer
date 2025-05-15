@@ -1,0 +1,29 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Editor Files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Compiled output
+*.crx
+*.pem
+*.zip
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Debug files
+debug.log 
