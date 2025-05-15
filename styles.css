@@ -201,10 +201,19 @@
   transition: all 0.2s ease !important;
   padding: 0 !important;
   margin: 0 !important;
+  position: relative !important;
+  z-index: 2147483649 !important; /* Установка z-index выше, чем у модального окна */
 }
 
 #glass-settings-close:hover {
   background: rgba(255, 255, 255, 0.8) !important;
+  transform: scale(1.1) !important;
+  color: #000 !important;
+}
+
+#glass-settings-close:active {
+  background: rgba(255, 255, 255, 1) !important;
+  transform: scale(0.95) !important;
 }
 
 /* Стили для элементов формы настроек */

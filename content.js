@@ -215,6 +215,24 @@ function createSettingsModal() {
     const settingsClose = document.createElement("button")
     settingsClose.id = "glass-settings-close"
     settingsClose.textContent = "✕"
+    settingsClose.setAttribute("type", "button") // Явно указываем тип кнопки
+
+    console.log(
+      "[GlassPanel] Создана кнопка закрытия модального окна:",
+      settingsClose
+    )
+
+    // Добавляем прямой обработчик события для кнопки закрытия
+    settingsClose.onclick = function (event) {
+      console.log(
+        "[GlassPanel] Кнопка закрытия модального окна нажата (onclick)"
+      )
+      event.preventDefault()
+      event.stopPropagation() // Предотвращаем всплытие события
+      closeSettingsModal()
+      return false // Дополнительно предотвращаем действие по умолчанию
+    }
+
     settingsHeader.appendChild(settingsClose)
 
     const settingsBody = document.createElement("div")
@@ -231,12 +249,19 @@ function createSettingsModal() {
     settingsContent.appendChild(settingsBody)
     settingsModal.appendChild(settingsContent)
 
+    // Добавляем обработчик клика для закрытия модального окна при клике вне его
+    settingsModal.addEventListener("click", function (event) {
+      if (event.target === settingsModal) {
+        console.log(
+          "[GlassPanel] Клик вне содержимого модального окна, закрываем"
+        )
+        closeSettingsModal()
+      }
+    })
+
     // Добавляем в конец body
     console.log("[GlassPanel] document.body доступен, добавляем модальное окно")
     document.body.appendChild(settingsModal)
-
-    // Обновляем обработчики событий
-    updateEventListeners()
 
     console.log("[GlassPanel] Модальное окно успешно создано")
     return settingsModal
@@ -267,8 +292,47 @@ function openSettingsModal() {
     console.log("[GlassPanel] Отображаем модальное окно")
     modal.style.display = "flex"
 
-    // Обновляем обработчики событий
-    updateEventListeners()
+    // Проверяем, работает ли кнопка закрытия
+    const closeButton = document.getElementById("glass-settings-close")
+    if (closeButton) {
+      console.log(
+        "[GlassPanel] Добавляем дополнительные обработчики для кнопки закрытия модального окна"
+      )
+
+      // Устанавливаем прямые атрибуты onclick для обеспечения максимальной совместимости
+      closeButton.onclick = function (event) {
+        console.log(
+          "[GlassPanel] Нажата кнопка закрытия модального окна (через onclick)"
+        )
+        event.preventDefault()
+        event.stopPropagation()
+        closeSettingsModal()
+        return false
+      }
+
+      // Также добавляем стандартный слушатель для надежности
+      closeButton.addEventListener(
+        "click",
+        function (e) {
+          console.log(
+            "[GlassPanel] Нажата кнопка закрытия модального окна (через addEventListener)"
+          )
+          e.preventDefault()
+          e.stopPropagation()
+          closeSettingsModal()
+        },
+        true
+      ) // Используем фазу захвата для перехвата события до его всплытия
+
+      // Делаем кнопку более заметной для отладки
+      closeButton.style.boxShadow = "0 0 5px red"
+
+      console.log(
+        "[GlassPanel] Обработчики для кнопки закрытия модального окна обновлены"
+      )
+    } else {
+      console.error("[GlassPanel] Кнопка закрытия модального окна не найдена!")
+    }
   } catch (error) {
     console.error("[GlassPanel] Ошибка при открытии модального окна:", error)
   }
@@ -306,25 +370,6 @@ document.addEventListener("keydown", function (event) {
 // Функция для обновления обработчиков событий на кнопках
 function updateEventListeners() {
   console.log("[GlassPanel] Обновляем обработчики событий")
-
-  // Обработчик для кнопки закрытия модального окна
-  const modalCloseButton = document.getElementById("glass-settings-close")
-  if (modalCloseButton) {
-    // Сначала удалим все обработчики событий
-    const newModalCloseButton = modalCloseButton.cloneNode(true)
-    modalCloseButton.parentNode.replaceChild(
-      newModalCloseButton,
-      modalCloseButton
-    )
-
-    // Добавим новый обработчик
-    newModalCloseButton.addEventListener("click", function (event) {
-      console.log("[GlassPanel] Нажата кнопка закрытия модального окна")
-      event.stopPropagation() // Предотвращаем всплытие события
-      closeSettingsModal()
-    })
-    console.log("[GlassPanel] Обновлен обработчик для кнопки закрытия настроек")
-  }
 
   // Обработчик для кнопки закрытия панели
   const panelCloseButton = document.getElementById("glass-panel-close")
@@ -379,25 +424,6 @@ function updateEventListeners() {
       openSettingsModal()
     })
     console.log("[GlassPanel] Обновлен обработчик для кнопки настроек")
-  }
-
-  // Обновляем обработчик для клика вне модального окна
-  const modal = document.getElementById("glass-settings-modal")
-  if (modal) {
-    // Сначала удаляем все обработчики
-    const newModal = modal.cloneNode(true)
-    modal.parentNode.replaceChild(newModal, modal)
-
-    // Добавляем новый обработчик
-    newModal.addEventListener("click", function (event) {
-      if (event.target === newModal) {
-        console.log(
-          "[GlassPanel] Клик вне содержимого модального окна, закрываем"
-        )
-        closeSettingsModal()
-      }
-    })
-    console.log("[GlassPanel] Обновлен обработчик для модального окна")
   }
 }
 
