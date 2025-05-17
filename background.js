@@ -18,6 +18,10 @@ let timerSettings = {
   isTimerRunning: false,
   pausedAt: null,
   lastUpdated: Date.now(),
+  // Добавляем поля для поддержки единого управляющего таймера
+  controlTabId: null, // ID вкладки, управляющей таймером
+  lastUpdateTime: 0, // Время последнего обновления таймера
+  timerStartTimestamp: 0, // Время запуска таймера
 }
 
 // Функция для проверки возможности отправки сообщения на вкладку
@@ -235,6 +239,63 @@ chrome.tabs.onCreated.addListener((tab) => {
   }
 })
 
+// Отслеживаем закрытие вкладок
+chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+  console.log(`[GlassPanel] Закрыта вкладка id=${tabId}`)
+
+  // Проверяем, была ли закрытая вкладка управляющей для таймера
+  if (timerSettings.controlTabId === tabId && timerSettings.isTimerRunning) {
+    console.log(`[GlassPanel] Закрыта управляющая вкладка таймера, ищем замену`)
+
+    // Сбрасываем управляющую вкладку
+    timerSettings.controlTabId = null
+    timerSettings.lastUpdateTime = Date.now()
+
+    // Находим все активные вкладки, чтобы выбрать новую управляющую
+    chrome.tabs.query({}, (tabs) => {
+      console.log(
+        `[GlassPanel] Найдено ${tabs.length} вкладок для выбора новой управляющей`
+      )
+
+      // Фильтруем только те вкладки, которые могут работать с расширением
+      const compatibleTabs = tabs.filter((tab) =>
+        canInjectContentScript(tab.url)
+      )
+
+      if (compatibleTabs.length > 0) {
+        // Берем первую подходящую вкладку
+        const newControlTab = compatibleTabs[0]
+        console.log(
+          `[GlassPanel] Выбрана новая управляющая вкладка: ${newControlTab.id}`
+        )
+
+        // Отправляем обновленные настройки во все вкладки, не указывая новую управляющую вкладку
+        // Новая управляющая вкладка будет выбрана автоматически
+        broadcastMessage({
+          action: "updateTimerSettings",
+          settings: timerSettings,
+          forceSync: true,
+        })
+      } else {
+        console.log(
+          `[GlassPanel] Нет подходящих вкладок для передачи управления таймером, останавливаем таймер`
+        )
+
+        // Если нет подходящих вкладок, останавливаем таймер
+        timerSettings.isTimerRunning = false
+        timerSettings.pausedAt = Date.now()
+
+        // Отправляем обновленные настройки
+        broadcastMessage({
+          action: "updateTimerSettings",
+          settings: timerSettings,
+          forceSync: true,
+        })
+      }
+    })
+  }
+})
+
 // Обработчик сообщений от content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("[GlassPanel] Получено сообщение:", message)
@@ -257,6 +318,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       // Отправляем текущее состояние панели
       sendResponse({ show: panelState.show, timestamp: Date.now() })
+    } else if (message.action === "getTabId") {
+      // Возвращаем ID вкладки, отправившей запрос
+      console.log("[GlassPanel] Получен запрос на получение ID вкладки")
+      sendResponse({
+        tabId: sender.tab ? sender.tab.id : null,
+        timestamp: Date.now(),
+      })
     } else if (message.action === "syncTimerSettings") {
       // Получаем обновленные настройки таймера
       if (message.settings) {
@@ -268,8 +336,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Всегда обновляем метку времени последнего обновления
         message.settings.lastUpdated = Date.now()
 
-        // Сохраняем полученные настройки
-        timerSettings = message.settings
+        // Если закрывается вкладка, помечаем controlTabId как null
+        if (
+          message.tabClosing &&
+          sender.tab &&
+          message.settings.controlTabId === sender.tab.id
+        ) {
+          console.log(
+            `[GlassPanel] Управляющая вкладка ${sender.tab.id} закрывается`
+          )
+          message.settings.controlTabId = null
+        }
+
+        // Проверяем, нужно ли обновлять настройки таймера
+        // Обновляем только если время последнего обновления новее или это первое обновление
+        if (message.settings.lastUpdateTime > timerSettings.lastUpdateTime) {
+          console.log(
+            "[GlassPanel] Обновляем настройки таймера как более свежие"
+          )
+          timerSettings = message.settings
+        } else {
+          console.log(
+            "[GlassPanel] Пропускаем обновление настроек таймера, так как они устарели"
+          )
+        }
 
         // Сразу отправляем обновленные настройки всем вкладкам, включая отправителя
         // чтобы гарантировать, что все вкладки имеют одинаковое состояние таймера

@@ -19,6 +19,10 @@ let timerSettings = {
   customTimerRedWarningSeconds: 10,
   isTimerRunning: false,
   pausedAt: null,
+  // Добавляем информацию о том, какая вкладка управляет таймером
+  controlTabId: null, // ID вкладки, управляющей таймером
+  lastUpdateTime: 0, // Время последнего обновления
+  timerStartTimestamp: 0, // Время запуска таймера для расчета прошедшего времени
 }
 
 // Флаг, показывающий, был ли инициализирован content script
@@ -832,43 +836,93 @@ function updateButtonStates() {
   if (pauseBtn) pauseBtn.disabled = !timerSettings.isTimerRunning
 }
 
+// Отслеживаем видимость вкладки для корректной работы таймера
+document.addEventListener("visibilitychange", handleVisibilityChange)
+
+// Обработчик изменения видимости вкладки
+function handleVisibilityChange() {
+  console.log(
+    `[GlassPanel] Видимость вкладки изменилась: ${document.visibilityState}`
+  )
+
+  // Если вкладка стала активной и таймер запущен, синхронизируем с сервером
+  if (document.visibilityState === "visible" && timerSettings.isTimerRunning) {
+    requestTimerSettings()
+  }
+}
+
 // Функции управления таймером
 function startTimer() {
   if (timerSettings.isTimerRunning) return
 
-  timerSettings.isTimerRunning = true
-  timerSettings.pausedAt = null
+  // Запрашиваем ID текущей вкладки
+  chrome.runtime.sendMessage({ action: "getTabId" }, function (response) {
+    if (response && response.tabId) {
+      timerSettings.isTimerRunning = true
+      timerSettings.pausedAt = null
 
-  if (!timerInterval) {
-    timerInterval = setInterval(() => {
-      // Обновляем время в зависимости от типа таймера
-      if (timerSettings.timerType === "static") {
-        timerSettings.staticTimerRemainingSeconds--
-      } else {
-        // custom
-        if (timerSettings.customTimerDirection === "down") {
-          timerSettings.customTimerRemainingSeconds--
-          if (timerSettings.customTimerRemainingSeconds < 0) {
-            timerSettings.customTimerRemainingSeconds = 0
-          }
-        } else {
-          // up
-          timerSettings.customTimerRemainingSeconds++
-        }
+      // Устанавливаем текущую вкладку как управляющую таймером
+      timerSettings.controlTabId = response.tabId
+      timerSettings.lastUpdateTime = Date.now()
+      timerSettings.timerStartTimestamp = Date.now()
+
+      // Запускаем таймер
+      if (!timerInterval) {
+        timerInterval = setInterval(() => {
+          updateTimerBasedOnElapsedTime()
+        }, 1000)
       }
 
-      // Обновляем отображение
-      updateTimerDisplay()
+      // Обновляем вид кнопок
+      updateButtonStates()
 
-      // Синхронизируем состояние таймера с другими вкладками при каждом тике
+      // Синхронизируем состояние таймера с другими вкладками сразу после запуска
       syncTimerSettings()
-    }, 1000)
+    }
+  })
+}
+
+// Обновление таймера на основе реально прошедшего времени
+function updateTimerBasedOnElapsedTime() {
+  // Если таймер не запущен, выходим
+  if (!timerSettings.isTimerRunning) return
+
+  // Текущее время
+  const currentTime = Date.now()
+
+  // Расчет прошедшего времени в секундах с момента запуска таймера
+  const elapsedSeconds = Math.floor(
+    (currentTime - timerSettings.timerStartTimestamp) / 1000
+  )
+
+  // Обновляем состояние таймера на основе прошедшего времени
+  if (timerSettings.timerType === "static") {
+    // Для статического таймера вычитаем прошедшее время из начального значения
+    const initialTime = 180 // 3 минуты
+    timerSettings.staticTimerRemainingSeconds = Math.max(
+      0,
+      initialTime - elapsedSeconds
+    )
+  } else if (timerSettings.customTimerDirection === "down") {
+    // Для пользовательского таймера с обратным отсчетом
+    const initialTime =
+      timerSettings.customTimerRemainingSeconds + elapsedSeconds // Начальное значение
+    timerSettings.customTimerRemainingSeconds = Math.max(
+      0,
+      initialTime - elapsedSeconds
+    )
+  } else {
+    // Для пользовательского таймера с прямым отсчетом
+    timerSettings.customTimerRemainingSeconds = elapsedSeconds
   }
 
-  // Обновляем вид кнопок
-  updateButtonStates()
+  // Обновляем время последнего обновления
+  timerSettings.lastUpdateTime = currentTime
 
-  // Синхронизируем состояние таймера с другими вкладками сразу после запуска
+  // Обновляем отображение
+  updateTimerDisplay()
+
+  // Синхронизируем с другими вкладками
   syncTimerSettings()
 }
 
@@ -899,6 +953,9 @@ function resetTimer() {
     timerInterval = null
     timerSettings.isTimerRunning = false
   }
+
+  // Сбрасываем время запуска таймера
+  timerSettings.timerStartTimestamp = 0
 
   // Сбрасываем время в зависимости от типа таймера
   if (timerSettings.timerType === "static") {
@@ -1007,61 +1064,65 @@ function requestTimerSettings() {
 function handleTimerSettingsUpdate(settings) {
   console.log("[GlassPanel] Получены обновленные настройки таймера:", settings)
 
-  // Сохраняем старое значение isTimerRunning
-  const wasRunning = timerSettings.isTimerRunning
+  // Проверяем, является ли текущая вкладка управляющей
+  chrome.runtime.sendMessage({ action: "getTabId" }, function (response) {
+    if (response && response.tabId) {
+      const currentTabId = response.tabId
+      const isControlTab = currentTabId === settings.controlTabId
 
-  // Обновляем настройки таймера
-  timerSettings = settings
+      // Проверяем, насколько актуальны полученные настройки
+      if (settings.lastUpdateTime > timerSettings.lastUpdateTime) {
+        // Сохраняем старые значения для сравнения
+        const wasRunning = timerSettings.isTimerRunning
+        const oldStartTimestamp = timerSettings.timerStartTimestamp
 
-  // Обработка состояния таймера
-  if (timerSettings.isTimerRunning) {
-    // Если таймер должен работать
-    if (!timerInterval) {
-      console.log(
-        "[GlassPanel] Запускаем таймер в соответствии с полученными настройками"
-      )
+        // Обновляем настройки таймера, так как они более свежие
+        timerSettings = settings
 
-      // Запускаем интервал таймера
-      timerInterval = setInterval(() => {
-        // Обновляем время в зависимости от типа таймера
-        if (timerSettings.timerType === "static") {
-          timerSettings.staticTimerRemainingSeconds--
-        } else {
-          // custom
-          if (timerSettings.customTimerDirection === "down") {
-            timerSettings.customTimerRemainingSeconds--
-            if (timerSettings.customTimerRemainingSeconds < 0) {
-              timerSettings.customTimerRemainingSeconds = 0
-            }
-          } else {
-            // up
-            timerSettings.customTimerRemainingSeconds++
+        // Если изменился статус таймера или время старта, обновляем интервал
+        if (
+          wasRunning !== timerSettings.isTimerRunning ||
+          oldStartTimestamp !== timerSettings.timerStartTimestamp
+        ) {
+          // Если таймер был запущен, нужно его перезапустить с новыми настройками
+          if (timerInterval) {
+            clearInterval(timerInterval)
+            timerInterval = null
+          }
+
+          // Если теперь это управляющая вкладка и таймер должен работать, запускаем интервал
+          if (isControlTab && timerSettings.isTimerRunning) {
+            timerInterval = setInterval(() => {
+              updateTimerBasedOnElapsedTime()
+            }, 1000)
           }
         }
+      }
 
-        // Обновляем отображение
-        updateTimerDisplay()
+      // Обновляем отображение таймера всегда
+      updateTimerDisplay()
 
-        // Синхронизируем с другими вкладками при каждом тике
+      // Если управляющая вкладка закрылась, и таймер все ещё запущен,
+      // текущая вкладка может стать новой управляющей
+      if (timerSettings.isTimerRunning && !timerSettings.controlTabId) {
+        timerSettings.controlTabId = currentTabId
+        timerSettings.lastUpdateTime = Date.now()
+
+        // Запускаем таймер на этой вкладке
+        if (!timerInterval) {
+          timerInterval = setInterval(() => {
+            updateTimerBasedOnElapsedTime()
+          }, 1000)
+        }
+
+        // Синхронизируем настройки
         syncTimerSettings()
-      }, 1000)
+      }
     }
-  } else {
-    // Если таймер должен быть остановлен
-    if (timerInterval) {
-      console.log(
-        "[GlassPanel] Останавливаем таймер в соответствии с полученными настройками"
-      )
-      clearInterval(timerInterval)
-      timerInterval = null
-    }
-  }
 
-  // Обновляем отображение таймера и визуальные эффекты
-  updateTimerDisplay()
-
-  // Явно применяем визуальные эффекты по текущему состоянию таймера
-  applyVisualEffects()
+    // Явно применяем визуальные эффекты по текущему состоянию таймера
+    applyVisualEffects()
+  })
 }
 
 // Применение визуальных эффектов по текущему состоянию таймера
@@ -1125,6 +1186,40 @@ function applyVisualEffects() {
     removeBorderEffect()
   }
 }
+
+// Перед закрытием вкладки передаем управление другой вкладке
+window.addEventListener("beforeunload", function () {
+  // Проверяем, является ли текущая вкладка управляющей
+  chrome.runtime.sendMessage({ action: "getTabId" }, function (response) {
+    if (
+      response &&
+      response.tabId &&
+      timerSettings.controlTabId === response.tabId
+    ) {
+      console.log(
+        "[GlassPanel] Управляющая вкладка закрывается, передаем управление"
+      )
+
+      // Сбрасываем controlTabId, чтобы другая вкладка могла взять управление
+      timerSettings.controlTabId = null
+      timerSettings.lastUpdateTime = Date.now()
+
+      // Синхронизируем настройки перед закрытием
+      try {
+        chrome.runtime.sendMessage({
+          action: "syncTimerSettings",
+          settings: timerSettings,
+          tabClosing: true,
+        })
+      } catch (e) {
+        console.error(
+          "[GlassPanel] Ошибка при синхронизации при закрытии вкладки:",
+          e
+        )
+      }
+    }
+  })
+})
 
 // Регистрируем таймер
 glassPanel.timers = {
