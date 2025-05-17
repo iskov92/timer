@@ -119,7 +119,7 @@
 /* Содержимое модального окна */
 #glass-settings-content {
   width: 600px !important;
-  height: 500px !important;
+  max-height: 80vh !important;
   background: var(--panel-bg) !important;
   backdrop-filter: var(--panel-backdrop) !important;
   -webkit-backdrop-filter: var(--panel-backdrop) !important;
@@ -155,37 +155,23 @@
   overflow-y: auto !important;
 }
 
-/* Удаляем ненужные стили для форм настроек */
-/* Заменяем на стили для placeholder */
-.settings-placeholder {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  height: 100% !important;
+/* Секция настроек */
+.settings-section {
+  margin-bottom: 20px !important;
+}
+
+.settings-section h3 {
+  margin: 0 0 15px 0 !important;
   font-size: 16px !important;
-  color: #888 !important;
-  text-align: center !important;
-  padding: 20px !important;
+  font-weight: 500 !important;
+  color: #333 !important;
+  border-bottom: 1px solid rgba(200, 200, 200, 0.3) !important;
+  padding-bottom: 8px !important;
 }
 
-.settings-placeholder p {
-  margin: 0 !important;
-}
-
-/* Сохраняем заголовок модального окна */
-#glass-settings-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-#glass-settings-header h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 500;
-  color: #333;
+/* Удаляем ненужные стили для placeholder */
+.settings-placeholder {
+  display: none !important;
 }
 
 /* Кнопка закрытия настроек */
@@ -219,13 +205,6 @@
 #glass-settings-close:active {
   background: rgba(255, 255, 255, 1) !important;
   transform: scale(0.95) !important;
-}
-
-/* Стили для элементов формы настроек */
-.settings-group,
-.settings-item,
-.settings-footer {
-  display: none !important; /* Скрываем все элементы старой формы настроек */
 }
 
 /* Анимации для эффектов неона и уведомлений */
@@ -262,36 +241,27 @@
   }
 }
 
-/* Стили для таймеров */
-#glass-panel-timers {
-  display: flex !important;
-  flex-direction: row !important;
-  gap: 20px !important;
-  height: 100% !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  padding: 0 10px !important;
-}
-
+/* Стили для таймера */
 .timer-container {
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
   gap: 10px !important;
+  margin-left: 10px !important;
 }
 
 .timer-display {
   font-family: var(--timer-display-font) !important;
-  font-size: 18px !important;
+  font-size: 22px !important;
   background: var(--timer-display-bg) !important;
   color: var(--timer-display-color) !important;
-  padding: 3px 8px !important;
-  border-radius: 3px !important;
+  padding: 4px 10px !important;
+  border-radius: 4px !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2) !important;
-  letter-spacing: 1px !important;
+  letter-spacing: 2px !important;
   font-weight: bold !important;
-  min-width: 60px !important;
+  min-width: 80px !important;
   text-align: center !important;
 }
 
@@ -302,8 +272,8 @@
 }
 
 .timer-btn {
-  width: 24px !important;
-  height: 24px !important;
+  width: 28px !important;
+  height: 28px !important;
   border-radius: 50% !important;
   border: 1px solid rgba(255, 255, 255, 0.3) !important;
   background: rgba(255, 255, 255, 0.5) !important;
@@ -313,7 +283,7 @@
   align-items: center !important;
   justify-content: center !important;
   cursor: pointer !important;
-  font-size: 10px !important;
+  font-size: 12px !important;
   color: #333 !important;
   transition: all 0.2s ease !important;
   padding: 0 !important;
@@ -347,118 +317,75 @@
   color: #ff3300 !important;
 }
 
-.settings-btn {
-  color: #666 !important;
-}
-
-/* Модальное окно настроек таймера */
-.timer-settings-modal {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-  background: rgba(0, 0, 0, 0.5) !important;
-  backdrop-filter: blur(5px) !important;
-  -webkit-backdrop-filter: blur(5px) !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  z-index: 2147483649 !important; /* Выше, чем у панели */
-}
-
-.timer-settings-content {
-  width: 400px !important;
-  background: var(--panel-bg) !important;
-  backdrop-filter: var(--panel-backdrop) !important;
-  -webkit-backdrop-filter: var(--panel-backdrop) !important;
-  border-radius: 10px !important;
-  border: var(--panel-border) !important;
-  box-shadow: var(--panel-shadow) !important;
-  overflow: hidden !important;
-}
-
-.timer-settings-header {
-  display: flex !important;
-  justify-content: space-between !important;
-  align-items: center !important;
-  padding: 15px !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
-}
-
-.timer-settings-header h3 {
-  margin: 0 !important;
-  font-size: 16px !important;
-  font-weight: 500 !important;
-  color: #333 !important;
-}
-
-.timer-settings-header button {
-  width: 24px !important;
-  height: 24px !important;
-  border-radius: 50% !important;
-  border: 1px solid rgba(255, 255, 255, 0.3) !important;
-  background: rgba(255, 255, 255, 0.5) !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  cursor: pointer !important;
-  font-size: 12px !important;
-  color: #333 !important;
-  transition: all 0.2s ease !important;
-  padding: 0 !important;
-}
-
-.timer-settings-body {
-  padding: 15px !important;
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 15px !important;
-}
-
+/* Стили для группы настроек */
 .settings-group {
   display: flex !important;
   flex-direction: column !important;
-  gap: 8px !important;
+  gap: 10px !important;
+  margin-bottom: 15px !important;
+  background: rgba(255, 255, 255, 0.2) !important;
+  padding: 15px !important;
+  border-radius: 5px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
 
 .settings-group label {
   font-size: 14px !important;
   color: #333 !important;
+  font-weight: 500 !important;
 }
 
 .radio-group {
   display: flex !important;
   flex-direction: column !important;
-  gap: 5px !important;
+  gap: 8px !important;
   margin-left: 5px !important;
 }
 
 .radio-group label {
   display: flex !important;
   align-items: center !important;
-  gap: 5px !important;
+  gap: 8px !important;
   font-size: 14px !important;
+  font-weight: normal !important;
   cursor: pointer !important;
 }
 
 .settings-group input[type="number"] {
-  padding: 6px 10px !important;
+  padding: 8px 12px !important;
   border-radius: 4px !important;
   border: 1px solid rgba(0, 0, 0, 0.2) !important;
   background: rgba(255, 255, 255, 0.8) !important;
   font-size: 14px !important;
+  width: 100px !important;
 }
 
+/* Подменю настроек таймера */
+#custom-timer-settings {
+  margin-left: 15px !important;
+  background: rgba(255, 255, 255, 0.3) !important;
+}
+
+#countdown-settings {
+  margin-left: 15px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  padding-top: 10px !important;
+}
+
+/* Кнопки в футере настроек */
 .settings-footer {
   display: flex !important;
   justify-content: flex-end !important;
   gap: 10px !important;
-  margin-top: 10px !important;
+  margin-top: 20px !important;
+  padding-top: 15px !important;
+  border-top: 1px solid rgba(200, 200, 200, 0.3) !important;
 }
 
 .settings-footer button {
-  padding: 6px 12px !important;
+  padding: 8px 15px !important;
   border-radius: 4px !important;
   border: 1px solid rgba(255, 255, 255, 0.3) !important;
   background: rgba(255, 255, 255, 0.7) !important;
@@ -471,12 +398,12 @@
   background: rgba(255, 255, 255, 0.9) !important;
 }
 
-#custom-timer-settings-save {
+#settings-save {
   background-color: rgba(0, 150, 255, 0.7) !important;
   color: white !important;
 }
 
-#custom-timer-settings-save:hover {
+#settings-save:hover {
   background-color: rgba(0, 150, 255, 0.9) !important;
 }
 

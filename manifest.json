@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Стеклянная панель",
+  "name": "Timer Panel",
   "version": "1.0",
-  "description": "Отображает стеклянную панель поверх всех открытых вкладок",
+  "description": "Timer Panel",
   "permissions": ["tabs", "storage"],
   "action": {
     "default_icon": {

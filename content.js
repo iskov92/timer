@@ -9,6 +9,96 @@ const glassPanel = {
   timers: null, // Добавляем объект для работы с таймерами
 }
 
+// Настройки таймера (глобально для синхронизации)
+let timerSettings = {
+  timerType: "static", // static или custom
+  staticTimerRemainingSeconds: 180, // 3 минуты
+  customTimerRemainingSeconds: 0,
+  customTimerDirection: "down", // 'down' или 'up'
+  customTimerYellowWarningSeconds: 30,
+  customTimerRedWarningSeconds: 10,
+  isTimerRunning: false,
+  pausedAt: null,
+}
+
+// Флаг, показывающий, был ли инициализирован content script
+let isContentScriptInitialized = false
+
+// Функция инициализации content script
+function initContentScript() {
+  if (isContentScriptInitialized) {
+    console.log(
+      "[GlassPanel] Content script уже инициализирован, пропускаем повторную инициализацию"
+    )
+    return
+  }
+
+  console.log("[GlassPanel] Инициализация content script")
+
+  // Устанавливаем флаг инициализации
+  isContentScriptInitialized = true
+
+  // Запрашиваем текущее состояние панели
+  checkPanelState()
+
+  // Устанавливаем обработчик сообщений от background.js
+  setupMessageListener()
+
+  console.log("[GlassPanel] Content script успешно инициализирован")
+}
+
+// Установка обработчика сообщений от background.js
+function setupMessageListener() {
+  console.log("[GlassPanel] Устанавливаем обработчик сообщений")
+
+  // Обработка сообщений от background.js
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    console.log("[GlassPanel] Получено сообщение:", message)
+
+    try {
+      if (message.action === "togglePanel") {
+        console.log(
+          `[GlassPanel] Обрабатываем togglePanel, show=${message.show}`
+        )
+
+        // Убеждаемся, что статус правильно установлен
+        const shouldShow = !!message.show // Приводим к boolean
+        console.log(`[GlassPanel] Преобразованный статус show=${shouldShow}`)
+
+        // Вызываем togglePanel с явным указанием show параметра
+        handleTogglePanel(shouldShow)
+
+        // Подтверждаем получение с результатом действия
+        console.log(
+          "[GlassPanel] Отправляем подтверждение обработки togglePanel"
+        )
+        sendResponse({
+          success: true,
+          panelVisible: shouldShow,
+          timestamp: Date.now(),
+        })
+      } else if (message.action === "updateTimerSettings") {
+        // Получены обновленные настройки таймера от background.js
+        if (message.settings) {
+          // Обновляем настройки таймера
+          handleTimerSettingsUpdate(message.settings)
+
+          // Подтверждаем получение
+          sendResponse({
+            success: true,
+            timestamp: Date.now(),
+          })
+        }
+      }
+    } catch (error) {
+      console.error("[GlassPanel] Ошибка при обработке сообщения:", error)
+      sendResponse({ success: false, error: error.message })
+    }
+
+    return true // Явно указываем, что планируем вызывать sendResponse асинхронно
+  })
+}
+
 // Реализация panel.js
 // ===================================
 // Функции для работы с панелью
@@ -40,26 +130,15 @@ function createPanel() {
     const panel = document.createElement("div")
     panel.id = "glass-panel"
 
-    // Добавляем контент в панель с двумя таймерами
+    // Добавляем контент в панель с одним таймером
     panel.innerHTML = `
       <div id="glass-panel-content">
-        <div id="glass-panel-timers">
-          <div id="static-timer" class="timer-container">
-            <div class="timer-display">03:00</div>
-            <div class="timer-controls">
-              <button class="timer-btn start-btn">▶</button>
-              <button class="timer-btn pause-btn">⏸️</button>
-              <button class="timer-btn reset-btn">↺</button>
-            </div>
-          </div>
-          <div id="custom-timer" class="timer-container">
-            <div class="timer-display">00:00</div>
-            <div class="timer-controls">
-              <button class="timer-btn start-btn">▶</button>
-              <button class="timer-btn pause-btn">⏸️</button>
-              <button class="timer-btn reset-btn">↺</button>
-              <button class="timer-btn settings-btn">⚙️</button>
-            </div>
+        <div id="timer-container" class="timer-container">
+          <div class="timer-display">03:00</div>
+          <div class="timer-controls">
+            <button class="timer-btn start-btn" title="Запустить">▶</button>
+            <button class="timer-btn pause-btn" title="Пауза">⏸️</button>
+            <button class="timer-btn reset-btn" title="Сбросить">↺</button>
           </div>
         </div>
       </div>
@@ -93,8 +172,8 @@ function createPanel() {
     // Обновляем обработчики событий для кнопок
     updateEventListeners()
 
-    // Инициализируем таймеры
-    initTimers()
+    // Инициализируем таймер
+    initTimer()
 
     console.log("[GlassPanel] Панель успешно создана")
     return panel
@@ -263,10 +342,73 @@ function createSettingsModal() {
     const settingsBody = document.createElement("div")
     settingsBody.id = "glass-settings-body"
 
-    // Пустое содержимое настроек
+    // Содержимое настроек с выбором типа таймера
     settingsBody.innerHTML = `
-      <div class="settings-placeholder">
-        <p>Настройки будут добавлены позже</p>
+      <div class="settings-section">
+        <h3>Настройки таймера</h3>
+        <div class="settings-group">
+          <label>Тип таймера:</label>
+          <div class="radio-group">
+            <label>
+              <input type="radio" name="timer-type" value="static" ${
+                timerSettings.timerType === "static" ? "checked" : ""
+              }>
+              Таймер ожидания клиента (3 минуты)
+            </label>
+            <label>
+              <input type="radio" name="timer-type" value="custom" ${
+                timerSettings.timerType === "custom" ? "checked" : ""
+              }>
+              Настраиваемый таймер
+            </label>
+          </div>
+        </div>
+        
+        <div id="custom-timer-settings" class="settings-group" ${
+          timerSettings.timerType === "static" ? 'style="display:none"' : ""
+        }>
+          <label>Режим таймера:</label>
+          <div class="radio-group">
+            <label>
+              <input type="radio" name="timer-direction" value="down" ${
+                timerSettings.customTimerDirection === "down" ? "checked" : ""
+              }>
+              Обратный отсчет
+            </label>
+            <label>
+              <input type="radio" name="timer-direction" value="up" ${
+                timerSettings.customTimerDirection === "up" ? "checked" : ""
+              }>
+              Прямой отсчет
+            </label>
+          </div>
+          
+          <div id="countdown-settings" ${
+            timerSettings.customTimerDirection === "up"
+              ? 'style="display:none"'
+              : ""
+          }>
+            <label for="custom-timer-settings-input">Время (в минутах):</label>
+            <input type="number" id="custom-timer-minutes" min="0" value="${Math.floor(
+              timerSettings.customTimerRemainingSeconds / 60
+            )}">
+            
+            <label for="yellow-warning-time">Желтое предупреждение (секунды):</label>
+            <input type="number" id="yellow-warning-time" min="0" value="${
+              timerSettings.customTimerYellowWarningSeconds
+            }">
+            
+            <label for="red-warning-time">Красное предупреждение (секунды):</label>
+            <input type="number" id="red-warning-time" min="0" value="${
+              timerSettings.customTimerRedWarningSeconds
+            }">
+          </div>
+        </div>
+      </div>
+      
+      <div class="settings-footer">
+        <button id="settings-save">Сохранить</button>
+        <button id="settings-cancel">Отмена</button>
       </div>
     `
 
@@ -288,6 +430,9 @@ function createSettingsModal() {
     console.log("[GlassPanel] document.body доступен, добавляем модальное окно")
     document.body.appendChild(settingsModal)
 
+    // Добавляем обработчики для настроек таймера
+    setupTimerSettingsListeners(settingsModal)
+
     console.log("[GlassPanel] Модальное окно успешно создано")
     return settingsModal
   } catch (error) {
@@ -296,70 +441,86 @@ function createSettingsModal() {
   }
 }
 
-/**
- * Открывает модальное окно настроек
- */
-function openSettingsModal() {
-  console.log("[GlassPanel] Вызвана функция openSettingsModal")
-
-  try {
-    let modal = document.getElementById("glass-settings-modal")
-
-    if (!modal) {
-      console.log("[GlassPanel] Модальное окно не существует, создаем")
-      modal = createSettingsModal()
-      if (!modal) {
-        console.error("[GlassPanel] Не удалось создать модальное окно")
-        return
+// Настройка обработчиков событий для настроек таймера
+function setupTimerSettingsListeners(modal) {
+  // Переключение между типами таймера
+  const timerTypeRadios = modal.querySelectorAll('input[name="timer-type"]')
+  timerTypeRadios.forEach((radio) => {
+    radio.addEventListener("change", (e) => {
+      const customTimerSettings = modal.querySelector("#custom-timer-settings")
+      if (e.target.value === "custom") {
+        customTimerSettings.style.display = "block"
+      } else {
+        customTimerSettings.style.display = "none"
       }
-    }
+    })
+  })
 
-    console.log("[GlassPanel] Отображаем модальное окно")
-    modal.style.display = "flex"
+  // Переключение между режимами таймера
+  const timerDirectionRadios = modal.querySelectorAll(
+    'input[name="timer-direction"]'
+  )
+  timerDirectionRadios.forEach((radio) => {
+    radio.addEventListener("change", (e) => {
+      const countdownSettings = modal.querySelector("#countdown-settings")
+      if (e.target.value === "down") {
+        countdownSettings.style.display = "block"
+      } else {
+        countdownSettings.style.display = "none"
+      }
+    })
+  })
 
-    // Проверяем, работает ли кнопка закрытия
-    const closeButton = document.getElementById("glass-settings-close")
-    if (closeButton) {
-      console.log(
-        "[GlassPanel] Добавляем дополнительные обработчики для кнопки закрытия модального окна"
-      )
+  // Обработчик сохранения настроек
+  const saveButton = modal.querySelector("#settings-save")
+  if (saveButton) {
+    saveButton.addEventListener("click", () => {
+      // Получаем значения полей
+      const type = modal.querySelector('input[name="timer-type"]:checked').value
 
-      // Устанавливаем прямые атрибуты onclick для обеспечения максимальной совместимости
-      closeButton.onclick = function (event) {
-        console.log(
-          "[GlassPanel] Нажата кнопка закрытия модального окна (через onclick)"
-        )
-        event.preventDefault()
-        event.stopPropagation()
-        closeSettingsModal()
-        return false
+      // Обновляем тип таймера
+      timerSettings.timerType = type
+
+      if (type === "custom") {
+        // Дополнительные настройки для пользовательского таймера
+        const direction = modal.querySelector(
+          'input[name="timer-direction"]:checked'
+        ).value
+        timerSettings.customTimerDirection = direction
+
+        if (direction === "down") {
+          const minutes =
+            parseInt(modal.querySelector("#custom-timer-minutes").value) || 0
+          timerSettings.customTimerRemainingSeconds = minutes * 60
+
+          timerSettings.customTimerYellowWarningSeconds =
+            parseInt(modal.querySelector("#yellow-warning-time").value) || 30
+          timerSettings.customTimerRedWarningSeconds =
+            parseInt(modal.querySelector("#red-warning-time").value) || 10
+        } else {
+          // Для прямого отсчета начинаем с 0
+          timerSettings.customTimerRemainingSeconds = 0
+        }
+      } else {
+        // Для статического таймера сбрасываем к 3 минутам
+        timerSettings.staticTimerRemainingSeconds = 180
       }
 
-      // Также добавляем стандартный слушатель для надежности
-      closeButton.addEventListener(
-        "click",
-        function (e) {
-          console.log(
-            "[GlassPanel] Нажата кнопка закрытия модального окна (через addEventListener)"
-          )
-          e.preventDefault()
-          e.stopPropagation()
-          closeSettingsModal()
-        },
-        true
-      ) // Используем фазу захвата для перехвата события до его всплытия
+      // Сбрасываем таймер и обновляем его отображение
+      resetTimer()
 
-      // Делаем кнопку более заметной для отладки
-      closeButton.style.boxShadow = "0 0 5px red"
+      // Сохраняем настройки таймера и синхронизируем с другими вкладками
+      syncTimerSettings()
 
-      console.log(
-        "[GlassPanel] Обработчики для кнопки закрытия модального окна обновлены"
-      )
-    } else {
-      console.error("[GlassPanel] Кнопка закрытия модального окна не найдена!")
-    }
-  } catch (error) {
-    console.error("[GlassPanel] Ошибка при открытии модального окна:", error)
+      // Закрываем модальное окно
+      closeSettingsModal()
+    })
+  }
+
+  // Обработчик отмены
+  const cancelButton = modal.querySelector("#settings-cancel")
+  if (cancelButton) {
+    cancelButton.addEventListener("click", closeSettingsModal)
   }
 }
 
@@ -411,14 +572,10 @@ function updateEventListeners() {
       console.log("[GlassPanel] Нажата кнопка закрытия панели")
       event.stopPropagation() // Предотвращаем всплытие события
 
-      // Очищаем все интервалы таймеров перед закрытием
-      if (staticTimerInterval) {
-        clearInterval(staticTimerInterval)
-        staticTimerInterval = null
-      }
-      if (customTimerInterval) {
-        clearInterval(customTimerInterval)
-        customTimerInterval = null
+      // Останавливаем таймер
+      if (timerInterval) {
+        clearInterval(timerInterval)
+        timerInterval = null
       }
 
       // Удаляем эффекты границ, если они есть
@@ -455,13 +612,43 @@ function updateEventListeners() {
     const newSettingsButton = settingsButton.cloneNode(true)
     settingsButton.parentNode.replaceChild(newSettingsButton, settingsButton)
 
-    // Добавим новый обработчик
+    // Добавим новый обработчик - исправляем ошибку, вместо openSettingsModal используем createSettingsModal
     newSettingsButton.addEventListener("click", function (event) {
       console.log("[GlassPanel] Нажата кнопка настроек")
       event.stopPropagation() // Предотвращаем всплытие события
-      openSettingsModal()
+
+      // Создаем модальное окно и показываем его
+      let modal = createSettingsModal()
+      if (modal) {
+        modal.style.display = "flex"
+      }
     })
     console.log("[GlassPanel] Обновлен обработчик для кнопки настроек")
+  }
+}
+
+/**
+ * Открывает модальное окно настроек
+ */
+function openSettingsModal() {
+  console.log("[GlassPanel] Вызвана функция openSettingsModal")
+
+  try {
+    let modal = document.getElementById("glass-settings-modal")
+
+    if (!modal) {
+      console.log("[GlassPanel] Модальное окно не существует, создаем")
+      modal = createSettingsModal()
+      if (!modal) {
+        console.error("[GlassPanel] Не удалось создать модальное окно")
+        return
+      }
+    }
+
+    console.log("[GlassPanel] Отображаем модальное окно")
+    modal.style.display = "flex"
+  } catch (error) {
+    console.error("[GlassPanel] Ошибка при открытии модального окна:", error)
   }
 }
 
@@ -476,19 +663,11 @@ console.log("[GlassPanel] Модуль settings инициализирован",
 
 // Реализация timers.js
 // ===================================
-// Функции для работы с таймерами
+// Функции для работы с таймером
 console.log("[GlassPanel] Инициализация модуля timers")
 
-// Глобальные переменные для таймеров
-let staticTimerInterval = null
-let customTimerInterval = null
-let staticTimerRemainingSeconds = 180 // 3 минуты
-let customTimerRemainingSeconds = 0
-let customTimerDirection = "down" // 'down' или 'up'
-let customTimerYellowWarningSeconds = 30
-let customTimerRedWarningSeconds = 10
-let isStaticTimerRunning = false
-let isCustomTimerRunning = false
+// Глобальная переменная для интервала таймера
+let timerInterval = null
 
 // Создаем эффект неона для страницы
 function createBorderEffect(color, blinking = false) {
@@ -573,359 +752,303 @@ function formatTime(totalSeconds, includeHours = false) {
   }
 }
 
-// Обновление отображения статического таймера
-function updateStaticTimerDisplay() {
-  const timerDisplay = document.querySelector("#static-timer .timer-display")
-  if (timerDisplay) {
-    timerDisplay.textContent = formatTime(staticTimerRemainingSeconds)
+// Обновление отображения таймера
+function updateTimerDisplay() {
+  const timerDisplay = document.querySelector(".timer-display")
+  if (!timerDisplay) return
 
-    // Применяем визуальные эффекты в зависимости от оставшегося времени
-    if (staticTimerRemainingSeconds <= 0) {
-      stopStaticTimer()
+  let secondsRemaining
+  let includeHours = false
+
+  // Определяем какой таймер отображать
+  if (timerSettings.timerType === "static") {
+    secondsRemaining = timerSettings.staticTimerRemainingSeconds
+  } else {
+    // custom
+    secondsRemaining = timerSettings.customTimerRemainingSeconds
+    // Для настраиваемого таймера проверяем, нужно ли включать часы
+    includeHours =
+      (timerSettings.customTimerDirection === "down" &&
+        timerSettings.customTimerRemainingSeconds >= 3600) ||
+      (timerSettings.customTimerDirection === "up" &&
+        timerSettings.customTimerRemainingSeconds >= 3600)
+  }
+
+  // Форматируем и отображаем время
+  timerDisplay.textContent = formatTime(secondsRemaining, includeHours)
+
+  // Применяем визуальные эффекты в зависимости от типа таймера и оставшегося времени
+  if (timerSettings.timerType === "static") {
+    // Эффекты для статического таймера
+    if (secondsRemaining <= 0) {
+      stopTimer()
       showTimeoutNotification()
       removeBorderEffect()
-    } else if (staticTimerRemainingSeconds <= 10) {
+    } else if (secondsRemaining <= 10) {
       createBorderEffect("#ff4d4d", true) // Красный мигающий эффект для последних 10 секунд
-    } else if (staticTimerRemainingSeconds <= 30) {
+    } else if (secondsRemaining <= 30) {
       createBorderEffect("#ffcc00") // Желтый эффект для последних 30 секунд
     }
-  }
-}
-
-// Обновление отображения пользовательского таймера
-function updateCustomTimerDisplay() {
-  const timerDisplay = document.querySelector("#custom-timer .timer-display")
-  if (timerDisplay) {
-    // Определяем, нужно ли добавлять часы в формат
-    const includeHours =
-      (customTimerDirection === "down" &&
-        customTimerRemainingSeconds >= 3600) ||
-      (customTimerDirection === "up" && customTimerRemainingSeconds >= 3600)
-
-    timerDisplay.textContent = formatTime(
-      customTimerRemainingSeconds,
-      includeHours
-    )
-
-    // Если таймер идет в обратном направлении, проверяем предупреждения
-    if (customTimerDirection === "down") {
-      if (customTimerRemainingSeconds <= 0) {
-        stopCustomTimer()
-        showTimeoutNotification()
-        removeBorderEffect()
-      } else if (customTimerRemainingSeconds <= customTimerRedWarningSeconds) {
-        createBorderEffect("#ff4d4d", true) // Красный мигающий эффект
-      } else if (
-        customTimerRemainingSeconds <= customTimerYellowWarningSeconds
-      ) {
-        createBorderEffect("#ffcc00") // Желтый эффект
-      }
+  } else if (
+    timerSettings.timerType === "custom" &&
+    timerSettings.customTimerDirection === "down"
+  ) {
+    // Эффекты для пользовательского таймера с обратным отсчетом
+    if (secondsRemaining <= 0) {
+      stopTimer()
+      showTimeoutNotification()
+      removeBorderEffect()
+    } else if (secondsRemaining <= timerSettings.customTimerRedWarningSeconds) {
+      createBorderEffect("#ff4d4d", true) // Красный мигающий эффект
+    } else if (
+      secondsRemaining <= timerSettings.customTimerYellowWarningSeconds
+    ) {
+      createBorderEffect("#ffcc00") // Желтый эффект
     }
   }
 }
 
-// Функции для статического таймера (3 минуты)
-function startStaticTimer() {
-  if (isStaticTimerRunning) return
+// Функции управления таймером
+function startTimer() {
+  if (timerSettings.isTimerRunning) return
 
-  isStaticTimerRunning = true
-  staticTimerInterval = setInterval(() => {
-    staticTimerRemainingSeconds--
-    updateStaticTimerDisplay()
+  timerSettings.isTimerRunning = true
+  timerSettings.pausedAt = null
+
+  timerInterval = setInterval(() => {
+    // Обновляем время в зависимости от типа таймера
+    if (timerSettings.timerType === "static") {
+      timerSettings.staticTimerRemainingSeconds--
+    } else {
+      // custom
+      if (timerSettings.customTimerDirection === "down") {
+        timerSettings.customTimerRemainingSeconds--
+        if (timerSettings.customTimerRemainingSeconds < 0) {
+          timerSettings.customTimerRemainingSeconds = 0
+        }
+      } else {
+        // up
+        timerSettings.customTimerRemainingSeconds++
+      }
+    }
+
+    // Обновляем отображение и синхронизируем с другими вкладками
+    updateTimerDisplay()
+    syncTimerSettings()
   }, 1000)
 
   // Обновляем вид кнопок
-  const startBtn = document.querySelector("#static-timer .start-btn")
-  const pauseBtn = document.querySelector("#static-timer .pause-btn")
+  const startBtn = document.querySelector(".start-btn")
+  const pauseBtn = document.querySelector(".pause-btn")
   if (startBtn) startBtn.disabled = true
   if (pauseBtn) pauseBtn.disabled = false
+
+  // Синхронизируем состояние таймера с другими вкладками
+  syncTimerSettings()
 }
 
-function pauseStaticTimer() {
-  if (!isStaticTimerRunning) return
+function pauseTimer() {
+  if (!timerSettings.isTimerRunning) return
 
-  isStaticTimerRunning = false
-  clearInterval(staticTimerInterval)
-  staticTimerInterval = null
+  timerSettings.isTimerRunning = false
+  clearInterval(timerInterval)
+  timerInterval = null
+
+  // Сохраняем время паузы для синхронизации
+  timerSettings.pausedAt = Date.now()
 
   // Обновляем вид кнопок
-  const startBtn = document.querySelector("#static-timer .start-btn")
-  const pauseBtn = document.querySelector("#static-timer .pause-btn")
+  const startBtn = document.querySelector(".start-btn")
+  const pauseBtn = document.querySelector(".pause-btn")
   if (startBtn) startBtn.disabled = false
   if (pauseBtn) pauseBtn.disabled = true
+
+  // Синхронизируем состояние таймера с другими вкладками
+  syncTimerSettings()
 }
 
-function resetStaticTimer() {
-  pauseStaticTimer()
-  staticTimerRemainingSeconds = 180 // 3 минуты
-  updateStaticTimerDisplay()
+function resetTimer() {
+  // Останавливаем таймер
+  if (timerSettings.isTimerRunning) {
+    clearInterval(timerInterval)
+    timerInterval = null
+    timerSettings.isTimerRunning = false
+  }
+
+  // Сбрасываем время в зависимости от типа таймера
+  if (timerSettings.timerType === "static") {
+    timerSettings.staticTimerRemainingSeconds = 180 // 3 минуты
+  } else if (timerSettings.customTimerDirection === "down") {
+    // Пользовательский таймер с обратным отсчетом - берем значение из настроек
+    const customMinutes =
+      parseInt(document.querySelector("#custom-timer-minutes")?.value) || 0
+    timerSettings.customTimerRemainingSeconds = customMinutes * 60
+  } else {
+    // Пользовательский таймер с прямым отсчетом - начинаем с 0
+    timerSettings.customTimerRemainingSeconds = 0
+  }
+
+  // Убираем эффекты
   removeBorderEffect()
 
-  // Сбросим состояние кнопок
-  const startBtn = document.querySelector("#static-timer .start-btn")
-  const pauseBtn = document.querySelector("#static-timer .pause-btn")
+  // Обновляем отображение
+  updateTimerDisplay()
+
+  // Сбрасываем состояние кнопок
+  const startBtn = document.querySelector(".start-btn")
+  const pauseBtn = document.querySelector(".pause-btn")
   if (startBtn) startBtn.disabled = false
   if (pauseBtn) pauseBtn.disabled = true
+
+  // Синхронизируем с другими вкладками
+  syncTimerSettings()
 }
 
-function stopStaticTimer() {
-  pauseStaticTimer()
+function stopTimer() {
+  pauseTimer()
 }
 
-// Функции для пользовательского таймера
-function startCustomTimer() {
-  if (isCustomTimerRunning) return
+// Синхронизация настроек таймера между вкладками
+function syncTimerSettings() {
+  // Отправляем текущие настройки в background.js для синхронизации
+  try {
+    chrome.runtime.sendMessage(
+      {
+        action: "syncTimerSettings",
+        settings: timerSettings,
+      },
+      function (response) {
+        if (chrome.runtime.lastError) {
+          console.log(
+            `[GlassPanel] Ошибка при синхронизации таймера: ${chrome.runtime.lastError.message}`
+          )
+        } else if (response) {
+          console.log("[GlassPanel] Ответ на синхронизацию таймера:", response)
+        }
+      }
+    )
+  } catch (error) {
+    console.error("[GlassPanel] Ошибка при отправке настроек таймера:", error)
+  }
+}
 
-  isCustomTimerRunning = true
-  customTimerInterval = setInterval(() => {
-    if (customTimerDirection === "down") {
-      customTimerRemainingSeconds--
-      if (customTimerRemainingSeconds < 0) {
-        customTimerRemainingSeconds = 0
-        stopCustomTimer()
-        showTimeoutNotification()
+// Инициализация таймера и обработчиков событий
+function initTimer() {
+  console.log("[GlassPanel] Инициализация таймера")
+
+  // Добавляем обработчики событий для кнопок таймера
+  const timerStart = document.querySelector(".start-btn")
+  const timerPause = document.querySelector(".pause-btn")
+  const timerReset = document.querySelector(".reset-btn")
+
+  if (timerStart) timerStart.addEventListener("click", startTimer)
+  if (timerPause) timerPause.addEventListener("click", pauseTimer)
+  if (timerReset) timerReset.addEventListener("click", resetTimer)
+
+  // Инициализация дисплея таймера
+  updateTimerDisplay()
+
+  // Делаем кнопку паузы изначально неактивной
+  const pauseBtn = document.querySelector(".pause-btn")
+  if (pauseBtn) pauseBtn.disabled = true
+
+  // Запрашиваем актуальные настройки таймера у background.js
+  requestTimerSettings()
+}
+
+// Запрос актуальных настроек таймера от background.js
+function requestTimerSettings() {
+  try {
+    chrome.runtime.sendMessage(
+      { action: "getTimerSettings" },
+      function (response) {
+        if (chrome.runtime.lastError) {
+          console.log(
+            `[GlassPanel] Ошибка при запросе настроек таймера: ${chrome.runtime.lastError.message}`
+          )
+        } else if (response && response.settings) {
+          console.log(
+            "[GlassPanel] Получены настройки таймера:",
+            response.settings
+          )
+
+          // Обновляем настройки таймера
+          timerSettings = response.settings
+
+          // Обновляем отображение таймера
+          updateTimerDisplay()
+
+          // Если таймер был запущен, продолжаем отсчет
+          if (timerSettings.isTimerRunning) {
+            // Проверяем, был ли таймер на паузе
+            if (timerSettings.pausedAt) {
+              // Таймер был на паузе, не запускаем
+            } else {
+              // Запускаем таймер, если он еще не запущен
+              if (!timerInterval) {
+                startTimer()
+              }
+            }
+          } else {
+            // Обновляем состояние кнопок
+            const startBtn = document.querySelector(".start-btn")
+            const pauseBtn = document.querySelector(".pause-btn")
+            if (startBtn) startBtn.disabled = false
+            if (pauseBtn) pauseBtn.disabled = true
+          }
+        }
+      }
+    )
+  } catch (error) {
+    console.error("[GlassPanel] Ошибка при запросе настроек таймера:", error)
+  }
+}
+
+// Обработка обновления настроек таймера от background.js
+function handleTimerSettingsUpdate(settings) {
+  console.log("[GlassPanel] Получены обновленные настройки таймера:", settings)
+
+  // Сохраняем старое значение isTimerRunning
+  const wasRunning = timerSettings.isTimerRunning
+
+  // Обновляем настройки таймера
+  timerSettings = settings
+
+  // Если состояние запуска изменилось, обновляем UI
+  if (wasRunning !== timerSettings.isTimerRunning) {
+    if (timerSettings.isTimerRunning) {
+      // Если таймер должен работать, а у нас не запущен интервал
+      if (!timerInterval) {
+        startTimer()
       }
     } else {
-      // up
-      customTimerRemainingSeconds++
+      // Если таймер не должен работать, а у нас запущен интервал
+      if (timerInterval) {
+        clearInterval(timerInterval)
+        timerInterval = null
+
+        // Обновляем состояние кнопок
+        const startBtn = document.querySelector(".start-btn")
+        const pauseBtn = document.querySelector(".pause-btn")
+        if (startBtn) startBtn.disabled = false
+        if (pauseBtn) pauseBtn.disabled = true
+      }
     }
-    updateCustomTimerDisplay()
-  }, 1000)
-
-  // Обновляем вид кнопок
-  const startBtn = document.querySelector("#custom-timer .start-btn")
-  const pauseBtn = document.querySelector("#custom-timer .pause-btn")
-  if (startBtn) startBtn.disabled = true
-  if (pauseBtn) pauseBtn.disabled = false
-}
-
-function pauseCustomTimer() {
-  if (!isCustomTimerRunning) return
-
-  isCustomTimerRunning = false
-  clearInterval(customTimerInterval)
-  customTimerInterval = null
-
-  // Обновляем вид кнопок
-  const startBtn = document.querySelector("#custom-timer .start-btn")
-  const pauseBtn = document.querySelector("#custom-timer .pause-btn")
-  if (startBtn) startBtn.disabled = false
-  if (pauseBtn) pauseBtn.disabled = true
-}
-
-function resetCustomTimer() {
-  pauseCustomTimer()
-
-  // При сбросе устанавливаем начальное значение в зависимости от направления
-  if (customTimerDirection === "down") {
-    // Если пользователь установил какое-то значение, сбрасываем к нему
-    // иначе к 0
-    customTimerRemainingSeconds =
-      customTimerRemainingSeconds > 0
-        ? parseInt(
-            document.querySelector("#custom-timer-settings-input").value
-          ) * 60 || 0
-        : 0
-  } else {
-    customTimerRemainingSeconds = 0
   }
 
-  updateCustomTimerDisplay()
-  removeBorderEffect()
-
-  // Сбросим состояние кнопок
-  const startBtn = document.querySelector("#custom-timer .start-btn")
-  const pauseBtn = document.querySelector("#custom-timer .pause-btn")
-  if (startBtn) startBtn.disabled = false
-  if (pauseBtn) pauseBtn.disabled = true
+  // Обновляем дисплей таймера
+  updateTimerDisplay()
 }
 
-function stopCustomTimer() {
-  pauseCustomTimer()
-}
-
-// Открываем модальное окно настроек пользовательского таймера
-function openCustomTimerSettings() {
-  console.log("[GlassPanel] Открываем настройки пользовательского таймера")
-
-  // Создаем модальное окно, если его нет
-  let modal = document.getElementById("custom-timer-settings-modal")
-  if (!modal) {
-    modal = document.createElement("div")
-    modal.id = "custom-timer-settings-modal"
-    modal.className = "timer-settings-modal"
-
-    // Содержимое настроек
-    let timeInMinutes = Math.floor(customTimerRemainingSeconds / 60)
-    modal.innerHTML = `
-      <div class="timer-settings-content">
-        <div class="timer-settings-header">
-          <h3>Настройки таймера</h3>
-          <button id="custom-timer-settings-close">✕</button>
-        </div>
-        <div class="timer-settings-body">
-          <div class="settings-group">
-            <label>Режим таймера:</label>
-            <div class="radio-group">
-              <label>
-                <input type="radio" name="timer-direction" value="down" ${
-                  customTimerDirection === "down" ? "checked" : ""
-                }>
-                Обратный отсчет
-              </label>
-              <label>
-                <input type="radio" name="timer-direction" value="up" ${
-                  customTimerDirection === "up" ? "checked" : ""
-                }>
-                Прямой отсчет
-              </label>
-            </div>
-          </div>
-          
-          <div class="settings-group" id="countdown-settings" ${
-            customTimerDirection === "up" ? 'style="display:none"' : ""
-          }>
-            <label for="custom-timer-settings-input">Время (в минутах):</label>
-            <input type="number" id="custom-timer-settings-input" min="0" value="${timeInMinutes}">
-            
-            <label for="yellow-warning-time">Желтое предупреждение (секунды):</label>
-            <input type="number" id="yellow-warning-time" min="0" value="${customTimerYellowWarningSeconds}">
-            
-            <label for="red-warning-time">Красное предупреждение (секунды):</label>
-            <input type="number" id="red-warning-time" min="0" value="${customTimerRedWarningSeconds}">
-          </div>
-          
-          <div class="settings-footer">
-            <button id="custom-timer-settings-save">Сохранить</button>
-            <button id="custom-timer-settings-cancel">Отмена</button>
-          </div>
-        </div>
-      </div>
-    `
-
-    document.body.appendChild(modal)
-
-    // Обработчики событий
-    modal
-      .querySelector("#custom-timer-settings-close")
-      .addEventListener("click", closeCustomTimerSettings)
-    modal
-      .querySelector("#custom-timer-settings-cancel")
-      .addEventListener("click", closeCustomTimerSettings)
-
-    // Обработчик сохранения настроек
-    modal
-      .querySelector("#custom-timer-settings-save")
-      .addEventListener("click", () => {
-        // Получаем значения полей
-        const direction = modal.querySelector(
-          'input[name="timer-direction"]:checked'
-        ).value
-        customTimerDirection = direction
-
-        if (direction === "down") {
-          const minutes =
-            parseInt(
-              modal.querySelector("#custom-timer-settings-input").value
-            ) || 0
-          customTimerRemainingSeconds = minutes * 60
-
-          customTimerYellowWarningSeconds =
-            parseInt(modal.querySelector("#yellow-warning-time").value) || 30
-          customTimerRedWarningSeconds =
-            parseInt(modal.querySelector("#red-warning-time").value) || 10
-        } else {
-          customTimerRemainingSeconds = 0
-        }
-
-        // Обновляем отображение
-        updateCustomTimerDisplay()
-        closeCustomTimerSettings()
-      })
-
-    // Переключение отображения настроек обратного отсчета
-    const directionRadios = modal.querySelectorAll(
-      'input[name="timer-direction"]'
-    )
-    directionRadios.forEach((radio) => {
-      radio.addEventListener("change", (e) => {
-        const countdownSettings = modal.querySelector("#countdown-settings")
-        if (e.target.value === "down") {
-          countdownSettings.style.display = "block"
-        } else {
-          countdownSettings.style.display = "none"
-        }
-      })
-    })
-  } else {
-    // Если окно уже существует, просто показываем его
-    modal.style.display = "flex"
-  }
-}
-
-// Закрываем модальное окно настроек пользовательского таймера
-function closeCustomTimerSettings() {
-  const modal = document.getElementById("custom-timer-settings-modal")
-  if (modal) {
-    modal.remove()
-  }
-}
-
-// Инициализация таймеров и обработчиков событий
-function initTimers() {
-  console.log("[GlassPanel] Инициализация таймеров")
-
-  // Добавляем обработчики событий для статического таймера
-  const staticTimerStart = document.querySelector("#static-timer .start-btn")
-  const staticTimerPause = document.querySelector("#static-timer .pause-btn")
-  const staticTimerReset = document.querySelector("#static-timer .reset-btn")
-
-  if (staticTimerStart)
-    staticTimerStart.addEventListener("click", startStaticTimer)
-  if (staticTimerPause)
-    staticTimerPause.addEventListener("click", pauseStaticTimer)
-  if (staticTimerReset)
-    staticTimerReset.addEventListener("click", resetStaticTimer)
-
-  // Добавляем обработчики событий для пользовательского таймера
-  const customTimerStart = document.querySelector("#custom-timer .start-btn")
-  const customTimerPause = document.querySelector("#custom-timer .pause-btn")
-  const customTimerReset = document.querySelector("#custom-timer .reset-btn")
-  const customTimerSettings = document.querySelector(
-    "#custom-timer .settings-btn"
-  )
-
-  if (customTimerStart)
-    customTimerStart.addEventListener("click", startCustomTimer)
-  if (customTimerPause)
-    customTimerPause.addEventListener("click", pauseCustomTimer)
-  if (customTimerReset)
-    customTimerReset.addEventListener("click", resetCustomTimer)
-  if (customTimerSettings)
-    customTimerSettings.addEventListener("click", openCustomTimerSettings)
-
-  // Инициализация дисплеев таймеров
-  updateStaticTimerDisplay()
-  updateCustomTimerDisplay()
-
-  // Делаем кнопки паузы изначально неактивными
-  const staticPauseBtn = document.querySelector("#static-timer .pause-btn")
-  const customPauseBtn = document.querySelector("#custom-timer .pause-btn")
-  if (staticPauseBtn) staticPauseBtn.disabled = true
-  if (customPauseBtn) customPauseBtn.disabled = true
-}
-
-// Регистрируем таймеры
+// Регистрируем таймер
 glassPanel.timers = {
-  init: initTimers,
-  startStaticTimer,
-  pauseStaticTimer,
-  resetStaticTimer,
-  startCustomTimer,
-  pauseCustomTimer,
-  resetCustomTimer,
-  openCustomTimerSettings,
-  closeCustomTimerSettings,
+  init: initTimer,
+  start: startTimer,
+  pause: pauseTimer,
+  reset: resetTimer,
+  update: updateTimerDisplay,
+  sync: syncTimerSettings,
+  handleSettingsUpdate: handleTimerSettingsUpdate,
 }
 
 console.log("[GlassPanel] Модуль timers инициализирован", glassPanel.timers)
@@ -995,7 +1118,7 @@ function checkPanelState() {
   }
 }
 
-// После загрузки страницы проверяем состояние панели
+// Запускаем инициализацию в зависимости от состояния документа
 if (
   document.readyState === "complete" ||
   document.readyState === "interactive"
@@ -1003,56 +1126,27 @@ if (
   console.log(
     `[GlassPanel] Документ уже загружен (readyState = ${document.readyState}), инициализируем сразу`
   )
-  // Отключаем автоматическое создание модального окна настроек
-  // if (glassPanel && glassPanel.settings) {
-  //   glassPanel.settings.createModal()
-  // }
-
-  // Проверяем состояние панели
-  checkPanelState()
+  // Отложенная инициализация для уверенности, что скрипт полностью загружен
+  setTimeout(initContentScript, 100)
 } else {
   console.log(
-    `[GlassPanel] Документ еще не загружен (readyState = ${document.readyState}), ждем событие load`
+    `[GlassPanel] Документ еще не загружен (readyState = ${document.readyState}), ждем событие DOMContentLoaded`
   )
-  window.addEventListener("load", function () {
-    console.log("[GlassPanel] Документ загружен, инициализируем")
-    // Отключаем автоматическое создание модального окна настроек
-    // if (glassPanel && glassPanel.settings) {
-    //   glassPanel.settings.createModal()
-    // }
 
-    // Проверяем состояние панели после загрузки страницы
-    checkPanelState()
+  // Обработчик для DOMContentLoaded - раньше, чем load
+  document.addEventListener("DOMContentLoaded", function () {
+    console.log("[GlassPanel] Событие DOMContentLoaded, инициализируем")
+    setTimeout(initContentScript, 100)
+  })
+
+  // Дополнительный обработчик для события load на случай, если DOMContentLoaded пропущен
+  window.addEventListener("load", function () {
+    console.log("[GlassPanel] Событие load, проверяем инициализацию")
+    if (!isContentScriptInitialized) {
+      console.log(
+        "[GlassPanel] Скрипт не был инициализирован при DOMContentLoaded, инициализируем сейчас"
+      )
+      setTimeout(initContentScript, 100)
+    }
   })
 }
-
-// Обработка сообщений от background.js
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log("[GlassPanel] Получено сообщение:", message)
-
-  try {
-    if (message.action === "togglePanel") {
-      console.log(`[GlassPanel] Обрабатываем togglePanel, show=${message.show}`)
-
-      // Убеждаемся, что статус правильно установлен
-      const shouldShow = !!message.show // Приводим к boolean
-      console.log(`[GlassPanel] Преобразованный статус show=${shouldShow}`)
-
-      // Вызываем togglePanel с явным указанием show параметра
-      handleTogglePanel(shouldShow)
-
-      // Подтверждаем получение с результатом действия
-      console.log("[GlassPanel] Отправляем подтверждение обработки togglePanel")
-      sendResponse({
-        success: true,
-        panelVisible: shouldShow,
-        timestamp: Date.now(),
-      })
-    }
-  } catch (error) {
-    console.error("[GlassPanel] Ошибка при обработке сообщения:", error)
-    sendResponse({ success: false, error: error.message })
-  }
-
-  return true
-})
