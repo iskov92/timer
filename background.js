@@ -260,32 +260,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.action === "syncTimerSettings") {
       // Получаем обновленные настройки таймера
       if (message.settings) {
-        // Проверяем, что полученные настройки новее текущих
-        if (
-          !message.settings.lastUpdated ||
-          message.settings.lastUpdated >= timerSettings.lastUpdated
-        ) {
-          console.log(
-            "[GlassPanel] Синхронизация настроек таймера:",
-            message.settings
-          )
+        console.log(
+          "[GlassPanel] Синхронизация настроек таймера:",
+          message.settings
+        )
 
-          // Обновляем время последнего обновления
-          message.settings.lastUpdated = Date.now()
+        // Всегда обновляем метку времени последнего обновления
+        message.settings.lastUpdated = Date.now()
 
-          // Обновляем настройки таймера
-          timerSettings = message.settings
+        // Сохраняем полученные настройки
+        timerSettings = message.settings
 
-          // Отправляем обновленные настройки всем вкладкам, кроме отправителя
-          broadcastMessage(
-            { action: "updateTimerSettings", settings: timerSettings },
-            sender.tab?.id
-          )
-        }
+        // Сразу отправляем обновленные настройки всем вкладкам, включая отправителя
+        // чтобы гарантировать, что все вкладки имеют одинаковое состояние таймера
+        broadcastMessage({
+          action: "updateTimerSettings",
+          settings: timerSettings,
+          forceSync: true, // Флаг принудительной синхронизации
+        })
       }
 
       // Отправляем ответ отправителю
-      sendResponse({ success: true, timestamp: Date.now() })
+      sendResponse({
+        success: true,
+        timestamp: Date.now(),
+        settings: timerSettings,
+      })
     } else if (message.action === "getTimerSettings") {
       // Отправляем текущие настройки таймера
       console.log("[GlassPanel] Отправляем настройки таймера:", timerSettings)
@@ -303,7 +303,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 function broadcastMessage(message, excludeTabId = null) {
   try {
     console.log(`[GlassPanel] Отправляем сообщение во все вкладки:`, message)
-    console.log(`[GlassPanel] Исключая вкладку: ${excludeTabId}`)
+
+    // Если есть флаг forceSync и это обновление таймера,
+    // то не исключаем вкладку отправителя для полной синхронизации
+    const shouldExclude = message.forceSync !== true ? excludeTabId : null
+
+    if (shouldExclude) {
+      console.log(`[GlassPanel] Исключая вкладку: ${shouldExclude}`)
+    } else {
+      console.log(`[GlassPanel] Отправляем всем вкладкам без исключений`)
+    }
 
     chrome.tabs.query({}, (tabs) => {
       console.log(`[GlassPanel] Найдено ${tabs.length} вкладок`)
@@ -312,7 +321,7 @@ function broadcastMessage(message, excludeTabId = null) {
         console.log(`[GlassPanel] Проверяем вкладку ${tab.id}`)
 
         // Проверяем, не является ли вкладка исключенной
-        if (excludeTabId && tab.id === excludeTabId) {
+        if (shouldExclude && tab.id === shouldExclude) {
           console.log(`[GlassPanel] Вкладка ${tab.id} исключена из рассылки`)
           continue
         }

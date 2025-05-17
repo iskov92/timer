@@ -694,6 +694,19 @@ function createBorderEffect(color, blinking = false) {
     // Если нужен мигающий эффект
     effectElement.style.animation =
       "neon-blink 0.5s ease-in-out infinite alternate"
+
+    // Добавляем стиль для анимации, если его еще нет
+    if (!document.getElementById("neon-blink-style")) {
+      const style = document.createElement("style")
+      style.id = "neon-blink-style"
+      style.textContent = `
+        @keyframes neon-blink {
+          from { opacity: 1; }
+          to { opacity: 0.6; }
+        }
+      `
+      document.head.appendChild(style)
+    }
   }
 
   document.body.appendChild(effectElement)
@@ -711,6 +724,11 @@ function removeBorderEffect() {
 
 // Показываем уведомление о завершении таймера
 function showTimeoutNotification() {
+  // Проверяем, не показано ли уже уведомление
+  if (document.getElementById("timer-notification")) {
+    return
+  }
+
   const notification = document.createElement("div")
   notification.id = "timer-notification"
   notification.textContent = "Время истекло!"
@@ -726,12 +744,33 @@ function showTimeoutNotification() {
   notification.style.boxShadow = "0 5px 15px rgba(0, 0, 0, 0.3)"
   notification.style.animation = "notification-fade-in 0.3s ease-out"
 
+  // Добавляем стиль для анимации, если его еще нет
+  if (!document.getElementById("notification-animations")) {
+    const style = document.createElement("style")
+    style.id = "notification-animations"
+    style.textContent = `
+      @keyframes notification-fade-in {
+        from { opacity: 0; transform: translate(-50%, -10px); }
+        to { opacity: 1; transform: translate(-50%, 0); }
+      }
+      @keyframes notification-fade-out {
+        from { opacity: 1; transform: translate(-50%, 0); }
+        to { opacity: 0; transform: translate(-50%, -10px); }
+      }
+    `
+    document.head.appendChild(style)
+  }
+
   document.body.appendChild(notification)
 
   // Удаляем уведомление через 3 секунды
   setTimeout(() => {
     notification.style.animation = "notification-fade-out 0.3s ease-in"
-    setTimeout(() => notification.remove(), 300)
+    setTimeout(() => {
+      if (notification && notification.parentNode) {
+        notification.parentNode.removeChild(notification)
+      }
+    }, 300)
   }, 3000)
 }
 
@@ -777,35 +816,20 @@ function updateTimerDisplay() {
   // Форматируем и отображаем время
   timerDisplay.textContent = formatTime(secondsRemaining, includeHours)
 
-  // Применяем визуальные эффекты в зависимости от типа таймера и оставшегося времени
-  if (timerSettings.timerType === "static") {
-    // Эффекты для статического таймера
-    if (secondsRemaining <= 0) {
-      stopTimer()
-      showTimeoutNotification()
-      removeBorderEffect()
-    } else if (secondsRemaining <= 10) {
-      createBorderEffect("#ff4d4d", true) // Красный мигающий эффект для последних 10 секунд
-    } else if (secondsRemaining <= 30) {
-      createBorderEffect("#ffcc00") // Желтый эффект для последних 30 секунд
-    }
-  } else if (
-    timerSettings.timerType === "custom" &&
-    timerSettings.customTimerDirection === "down"
-  ) {
-    // Эффекты для пользовательского таймера с обратным отсчетом
-    if (secondsRemaining <= 0) {
-      stopTimer()
-      showTimeoutNotification()
-      removeBorderEffect()
-    } else if (secondsRemaining <= timerSettings.customTimerRedWarningSeconds) {
-      createBorderEffect("#ff4d4d", true) // Красный мигающий эффект
-    } else if (
-      secondsRemaining <= timerSettings.customTimerYellowWarningSeconds
-    ) {
-      createBorderEffect("#ffcc00") // Желтый эффект
-    }
-  }
+  // Вместо встроенной логики визуальных эффектов, вызываем отдельную функцию
+  applyVisualEffects()
+
+  // Обновляем состояние кнопок
+  updateButtonStates()
+}
+
+// Обновление состояния кнопок в соответствии с состоянием таймера
+function updateButtonStates() {
+  const startBtn = document.querySelector(".start-btn")
+  const pauseBtn = document.querySelector(".pause-btn")
+
+  if (startBtn) startBtn.disabled = timerSettings.isTimerRunning
+  if (pauseBtn) pauseBtn.disabled = !timerSettings.isTimerRunning
 }
 
 // Функции управления таймером
@@ -815,35 +839,36 @@ function startTimer() {
   timerSettings.isTimerRunning = true
   timerSettings.pausedAt = null
 
-  timerInterval = setInterval(() => {
-    // Обновляем время в зависимости от типа таймера
-    if (timerSettings.timerType === "static") {
-      timerSettings.staticTimerRemainingSeconds--
-    } else {
-      // custom
-      if (timerSettings.customTimerDirection === "down") {
-        timerSettings.customTimerRemainingSeconds--
-        if (timerSettings.customTimerRemainingSeconds < 0) {
-          timerSettings.customTimerRemainingSeconds = 0
-        }
+  if (!timerInterval) {
+    timerInterval = setInterval(() => {
+      // Обновляем время в зависимости от типа таймера
+      if (timerSettings.timerType === "static") {
+        timerSettings.staticTimerRemainingSeconds--
       } else {
-        // up
-        timerSettings.customTimerRemainingSeconds++
+        // custom
+        if (timerSettings.customTimerDirection === "down") {
+          timerSettings.customTimerRemainingSeconds--
+          if (timerSettings.customTimerRemainingSeconds < 0) {
+            timerSettings.customTimerRemainingSeconds = 0
+          }
+        } else {
+          // up
+          timerSettings.customTimerRemainingSeconds++
+        }
       }
-    }
 
-    // Обновляем отображение и синхронизируем с другими вкладками
-    updateTimerDisplay()
-    syncTimerSettings()
-  }, 1000)
+      // Обновляем отображение
+      updateTimerDisplay()
+
+      // Синхронизируем состояние таймера с другими вкладками при каждом тике
+      syncTimerSettings()
+    }, 1000)
+  }
 
   // Обновляем вид кнопок
-  const startBtn = document.querySelector(".start-btn")
-  const pauseBtn = document.querySelector(".pause-btn")
-  if (startBtn) startBtn.disabled = true
-  if (pauseBtn) pauseBtn.disabled = false
+  updateButtonStates()
 
-  // Синхронизируем состояние таймера с другими вкладками
+  // Синхронизируем состояние таймера с другими вкладками сразу после запуска
   syncTimerSettings()
 }
 
@@ -851,17 +876,17 @@ function pauseTimer() {
   if (!timerSettings.isTimerRunning) return
 
   timerSettings.isTimerRunning = false
-  clearInterval(timerInterval)
-  timerInterval = null
+
+  if (timerInterval) {
+    clearInterval(timerInterval)
+    timerInterval = null
+  }
 
   // Сохраняем время паузы для синхронизации
   timerSettings.pausedAt = Date.now()
 
   // Обновляем вид кнопок
-  const startBtn = document.querySelector(".start-btn")
-  const pauseBtn = document.querySelector(".pause-btn")
-  if (startBtn) startBtn.disabled = false
-  if (pauseBtn) pauseBtn.disabled = true
+  updateButtonStates()
 
   // Синхронизируем состояние таймера с другими вкладками
   syncTimerSettings()
@@ -895,10 +920,7 @@ function resetTimer() {
   updateTimerDisplay()
 
   // Сбрасываем состояние кнопок
-  const startBtn = document.querySelector(".start-btn")
-  const pauseBtn = document.querySelector(".pause-btn")
-  if (startBtn) startBtn.disabled = false
-  if (pauseBtn) pauseBtn.disabled = true
+  updateButtonStates()
 
   // Синхронизируем с другими вкладками
   syncTimerSettings()
@@ -949,8 +971,7 @@ function initTimer() {
   updateTimerDisplay()
 
   // Делаем кнопку паузы изначально неактивной
-  const pauseBtn = document.querySelector(".pause-btn")
-  if (pauseBtn) pauseBtn.disabled = true
+  updateButtonStates()
 
   // Запрашиваем актуальные настройки таймера у background.js
   requestTimerSettings()
@@ -973,29 +994,7 @@ function requestTimerSettings() {
           )
 
           // Обновляем настройки таймера
-          timerSettings = response.settings
-
-          // Обновляем отображение таймера
-          updateTimerDisplay()
-
-          // Если таймер был запущен, продолжаем отсчет
-          if (timerSettings.isTimerRunning) {
-            // Проверяем, был ли таймер на паузе
-            if (timerSettings.pausedAt) {
-              // Таймер был на паузе, не запускаем
-            } else {
-              // Запускаем таймер, если он еще не запущен
-              if (!timerInterval) {
-                startTimer()
-              }
-            }
-          } else {
-            // Обновляем состояние кнопок
-            const startBtn = document.querySelector(".start-btn")
-            const pauseBtn = document.querySelector(".pause-btn")
-            if (startBtn) startBtn.disabled = false
-            if (pauseBtn) pauseBtn.disabled = true
-          }
+          handleTimerSettingsUpdate(response.settings)
         }
       }
     )
@@ -1014,30 +1013,117 @@ function handleTimerSettingsUpdate(settings) {
   // Обновляем настройки таймера
   timerSettings = settings
 
-  // Если состояние запуска изменилось, обновляем UI
-  if (wasRunning !== timerSettings.isTimerRunning) {
-    if (timerSettings.isTimerRunning) {
-      // Если таймер должен работать, а у нас не запущен интервал
-      if (!timerInterval) {
-        startTimer()
-      }
-    } else {
-      // Если таймер не должен работать, а у нас запущен интервал
-      if (timerInterval) {
-        clearInterval(timerInterval)
-        timerInterval = null
+  // Обработка состояния таймера
+  if (timerSettings.isTimerRunning) {
+    // Если таймер должен работать
+    if (!timerInterval) {
+      console.log(
+        "[GlassPanel] Запускаем таймер в соответствии с полученными настройками"
+      )
 
-        // Обновляем состояние кнопок
-        const startBtn = document.querySelector(".start-btn")
-        const pauseBtn = document.querySelector(".pause-btn")
-        if (startBtn) startBtn.disabled = false
-        if (pauseBtn) pauseBtn.disabled = true
-      }
+      // Запускаем интервал таймера
+      timerInterval = setInterval(() => {
+        // Обновляем время в зависимости от типа таймера
+        if (timerSettings.timerType === "static") {
+          timerSettings.staticTimerRemainingSeconds--
+        } else {
+          // custom
+          if (timerSettings.customTimerDirection === "down") {
+            timerSettings.customTimerRemainingSeconds--
+            if (timerSettings.customTimerRemainingSeconds < 0) {
+              timerSettings.customTimerRemainingSeconds = 0
+            }
+          } else {
+            // up
+            timerSettings.customTimerRemainingSeconds++
+          }
+        }
+
+        // Обновляем отображение
+        updateTimerDisplay()
+
+        // Синхронизируем с другими вкладками при каждом тике
+        syncTimerSettings()
+      }, 1000)
+    }
+  } else {
+    // Если таймер должен быть остановлен
+    if (timerInterval) {
+      console.log(
+        "[GlassPanel] Останавливаем таймер в соответствии с полученными настройками"
+      )
+      clearInterval(timerInterval)
+      timerInterval = null
     }
   }
 
-  // Обновляем дисплей таймера
+  // Обновляем отображение таймера и визуальные эффекты
   updateTimerDisplay()
+
+  // Явно применяем визуальные эффекты по текущему состоянию таймера
+  applyVisualEffects()
+}
+
+// Применение визуальных эффектов по текущему состоянию таймера
+function applyVisualEffects() {
+  let secondsRemaining
+
+  if (timerSettings.timerType === "static") {
+    secondsRemaining = timerSettings.staticTimerRemainingSeconds
+
+    // Визуальные эффекты для статического таймера
+    if (secondsRemaining <= 0) {
+      // Останавливаем таймер
+      if (timerSettings.isTimerRunning) {
+        stopTimer()
+      }
+
+      // Показываем уведомление, если время вышло
+      if (!document.getElementById("timer-notification")) {
+        showTimeoutNotification()
+      }
+      removeBorderEffect()
+    } else if (secondsRemaining <= 10) {
+      createBorderEffect("#ff4d4d", true) // Красный мигающий эффект
+    } else if (secondsRemaining <= 30) {
+      createBorderEffect("#ffcc00") // Желтый эффект
+    } else {
+      removeBorderEffect() // Убираем эффект
+    }
+  } else if (
+    timerSettings.timerType === "custom" &&
+    timerSettings.customTimerDirection === "down"
+  ) {
+    secondsRemaining = timerSettings.customTimerRemainingSeconds
+
+    // Визуальные эффекты для пользовательского таймера с обратным отсчетом
+    if (secondsRemaining <= 0) {
+      // Останавливаем таймер
+      if (timerSettings.isTimerRunning) {
+        stopTimer()
+      }
+
+      // Показываем уведомление, если время вышло
+      if (!document.getElementById("timer-notification")) {
+        showTimeoutNotification()
+      }
+      removeBorderEffect()
+    } else if (secondsRemaining <= timerSettings.customTimerRedWarningSeconds) {
+      createBorderEffect("#ff4d4d", true) // Красный мигающий эффект
+    } else if (
+      secondsRemaining <= timerSettings.customTimerYellowWarningSeconds
+    ) {
+      createBorderEffect("#ffcc00") // Желтый эффект
+    } else {
+      removeBorderEffect() // Убираем эффект
+    }
+  } else if (
+    timerSettings.timerType === "custom" &&
+    timerSettings.customTimerDirection === "up"
+  ) {
+    // Для таймера с прямым отсчетом просто убираем рамку
+    removeBorderEffect()
+  }
 }
 
 // Регистрируем таймер
@@ -1049,6 +1135,7 @@ glassPanel.timers = {
   update: updateTimerDisplay,
   sync: syncTimerSettings,
   handleSettingsUpdate: handleTimerSettingsUpdate,
+  applyVisualEffects: applyVisualEffects,
 }
 
 console.log("[GlassPanel] Модуль timers инициализирован", glassPanel.timers)
